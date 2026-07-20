@@ -19,7 +19,7 @@ This document is the **constitution** for the ai-quiz project. It is auto-loaded
 ## Technology Stack
 
 - Monorepo: pnpm workspaces (3 packages: `apps/api`, `apps/web`, `packages/shared`)
-- Backend: NestJS 10 + `@mastra/nestjs` adapter + Drizzle ORM + Postgres (Neon free)
+- Backend: NestJS 11.1.28 + `@mastra/nestjs` adapter + Drizzle ORM 0.45.2 + Postgres (Neon free). ⚠️ This file said **NestJS 10** until 2026-07-19; the spine and `architecture-spec.md` both pin **11.1.28** (web-verified during the architecture run). 11 is correct — do not revert.
 - Frontend: Next.js 15 (App Router) + Tailwind + shadcn/ui + framer-motion
 - Server state: TanStack Query v5 (query-keys factory in `apps/web/lib/queries.ts`)
 - Client state: React Context (UUID, theme) + `useState` per-component + custom `useLocalStorage` hook — **no Zustand**
@@ -48,7 +48,8 @@ This document is the **constitution** for the ai-quiz project. It is auto-loaded
 
 **Quiz generation flow (bounded critical path):**
 
-- **Sync — all work needed to reach `status='ready'`:** `fetch → neutralize → chunk → select ~8k-token chunk budget → 1 structured LLM call → persist → return`. Chunking stays sync — it is a *prerequisite* for generation and costs milliseconds.
+- **Sync — all work needed to reach `status='ready'`:** `fetch → neutralize → chunk → select ~8k-token chunk budget → 1 structured LLM call (question pool) → validate pool → select categories → stratified-sample → persist → return`. Chunking stays sync — it is a *prerequisite* for generation and costs milliseconds.
+- **Question pool, not category pool (redesign 2026-07-19).** The one LLM call returns a pool of `ceil(questionCount × 1.5)` **category-tagged** questions. Category selection (4–6, clamped to what the pool contains) and the **stratified** even draw are **pure system-side steps after the call returns**. The superseded category-pool design needed a round trip between category proposal and question generation — i.e. two calls — which contradicted the single-call rule. ⚠️ **The draw must be stratified by category, never a naive random draw across the pool**, or per-category question counts skew and `avgRawScore` stops being comparable. All-or-nothing retry applies to the **pool**: if fewer than `questionCount` questions survive grounding validation, regenerate the whole pool — never partially accept.
 - **Async — `void enrich(sessionId)` after the response is sent:** full document + chunk persistence, chat cache prefix, `knowledge_categories` aggregates, Langfuse flush. (Map-reduce was removed entirely — see FR-16; bounded critical path is one LLM call.)
 - **No queue, no Redis, no BullMQ.**
 - **Invariant:** enrichment is an **optimization, never a correctness dependency**. If Fly auto-stop kills it mid-flight, chat / gap-analysis finds no enrichment and computes on demand. Never write code that assumes enrichment ran.

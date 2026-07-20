@@ -1,8 +1,8 @@
 ---
 title: AI Quiz Agent
 created: 2026-07-16
-updated: 2026-07-16
-status: draft
+updated: 2026-07-19
+status: reviewed
 audited: 2026-07-16          # adversarial audit; 10 resolutions applied. See .memlog.md (Resolved Ambiguities section) and architecture-spec.md for implementation detail.
 sources:
   - _bmad-output/project-context.md (constitution)
@@ -38,7 +38,7 @@ Structured glossary-first; FRs numbered globally; SPEC archive referenced only f
 
 ## 1. Vision
 
-A **self-contained, production-shaped web app** that turns any publicly accessible Markdown document into an interactive comprehension session — generated questions grounded in the document, a graded response flow, and a persistent chat thread that supports per-question follow-up conversationally and surfaces the knowledge categories where the user is weakest. The user pastes a URL (e.g. a GitHub README), picks a strategy, the agent derives 6–10 candidate knowledge categories from the document, the system randomly selects 4–6 of them, and generates 5–8 questions evenly distributed across the selected set. The user responds in the web UI; the system grades the submission against a geometric-weighted rubric. After grading, the user can chat per-question (with `questionId` anchor) and request a whole-quiz gap analysis that ranks weak knowledge areas.
+A **self-contained, production-shaped web app** that turns any publicly accessible Markdown document into an interactive comprehension session — generated questions grounded in the document, a graded response flow, and a persistent chat thread that supports per-question follow-up conversationally and surfaces the knowledge categories where the user is weakest. The user pastes a URL (e.g. a GitHub README), picks a strategy, the agent generates an over-provisioned pool of category-tagged questions in a single call, and the system then selects 4–6 categories and stratified-samples 5–8 questions evenly across them. The user responds in the web UI; the system grades the submission against a geometric-weighted rubric. After grading, the user can chat freely about the quiz and request a whole-quiz gap analysis that ranks weak knowledge areas.
 
 The product demonstrates an end-to-end **LLM agent system** that respects real engineering constraints: hexagonal boundaries, server-enforced per-session ownership, SSRF defense on user-supplied URLs, prompt-injection hardening, provider-agnostic model selection, and zero-cost deployment to Vercel + Fly.io + Neon free tiers.
 
@@ -106,7 +106,7 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
 - **Submission** — A user's complete set of `selected` answer positions for a session. Scored once; idempotent on retry.
 - **Category** — An LLM-derived knowledge area tag on each question (e.g. "Streaming", "WebSockets"). Used for gap analysis; hidden during quiz.
 - **Insight** — An AI-generated artifact produced post-submit: a whole-quiz `gap_analysis` that ranks the user's weak knowledge categories and suggests study topics. Persisted; revisitable. Per-question follow-up is conversational via chat (FR-10), not via an insight endpoint.
-- **Chat message** — One turn in the persistent per-session chat thread. `user` or `assistant` role. May be anchored to a `questionId`.
+- **Chat message** — One turn in the persistent per-session chat thread. `user` or `assistant` role. **Free text, fully decoupled from questions — there is no `questionId` anchor** (decision 2026-07-19).
 - **Provider / Model** — The LLM backend the user selected for this session. Resolved by Mastra via env vars; user can swap per session via dropdown.
 - **Strategy** — One of `factual | comprehension | mixed | trivia`. User-selectable per session; LLM may propose one if user omits.
 - **Hexagonal architecture** — The backend's domain/ports/adapters split. Domain is pure; adapters own all I/O.
@@ -136,18 +136,31 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
 - Spec archive governs: §7.1, §11.2 (expanded IP blocklist, DNS-pin, IDN homograph, HTTP/0.9 rejection, **tiered size limits (10 MB HTTP body / 2 MB decoded markdown / ~500 KB token-estimated)**, 10s timeout, redirects off).
 - **Consequences:** SSRF test suite in `apps/api/test/security/` covers RFC1918 × IPv4/IPv6, loopback, IMDS hostnames, all non-http(s) schemes, IDN homograph.
 
-#### FR-2: Strategy (user-picked) + category selection (LLM-derived pool, random subset)
-[System] requires a `strategy` from the user (no LLM proposal); derives a category pool from the document; **randomly selects N categories** from the pool; constrains question generation to that subset.
+#### FR-2: Strategy (user-picked) + question pool with stratified category selection
+[System] requires a `strategy` from the user (no LLM proposal); generates an **over-provisioned pool of category-tagged questions in one call**; then **selects categories and stratified-samples the final quiz from that pool** — all system-side, after the LLM returns.
+
+> **Redesigned 2026-07-19 (question pool supersedes category pool).** The previous design had the LLM propose a *category* pool, the system randomly select 4–6, and a second constrained generation produce the questions. That was **internally contradictory**: FR-16 mandates a *single* LLM call, but injecting system-side randomness between category proposal and question generation requires a round trip (two calls). Moving the pool to the **question** layer resolves it — the one call produces everything, and all randomness becomes pure post-call system logic. It also removes the exact-allocation instruction ("produce 8 questions distributed 2-2-2-1-1"), which is a known LLM weak spot.
 - **Strategy is REQUIRED** in `POST /sessions` (enum: `factual | comprehension | mixed | trivia`). The LLM uses it as a prompt modifier — `factual` emphasizes recall, `comprehension` emphasizes "why/how", `mixed` mixes types, `trivia` emphasizes unusual facts. No silent default; no LLM proposal.
-- **Category pool:** LLM proposes 6–10 candidate categories from the document's headings/sections (single LLM call, deterministic per `(document, model)` so retries are stable).
-- **Selection:** system **randomly picks 4–6** from the pool per quiz (configurable). Different runs of the same URL produce different category mixes — adds replay value.
-- **Even distribution:** questions are spread **evenly** across the selected categories (e.g. 6 questions across 4 categories → 2-2-1-1).
-- **Consequences:** Vitest covers (a) strategy enum is required (Zod), (b) selected category count is in [4,6], (c) selected categories are a subset of the LLM-derived pool, (d) question count per category differs by ≤ 1.
+- **`questionCount` is user-supplied** *(decision 2026-07-19)* — integer in `[5,8]`, Zod-validated, **default 8**, persisted to `quiz_sessions.question_count`. Out-of-range → 400. It must be user-controlled because the `DOC_TOO_SHORT` guard (FR-16) tells the user to *reduce `questionCount`* — actionable only if they own the value.
+- **Question pool (the single LLM call):** one structured-output call generates a pool of **`ceil(questionCount × 1.5)`** questions (Q=8 → 12; Q=5 → 8), each **tagged with a category** the model derives from the document's headings/sections. **Determinism is scoped to CHUNK SELECTION, not model sampling** *(corrected 2026-07-19)* — the chunk budget fed to the prompt is deterministic per `(document, questionCount)`, but the model's sampling is **not** required to be deterministic: a byte-identical regeneration would make every retry land on the same failure. Retries vary sampling (temperature/seed) while holding the chunk budget fixed. See spine AD-N4. The instruction is simply "generate N good questions, tag each with a category" — **no exact per-category allocation is demanded of the model**.
+  - **Why 1.5× and not 2×:** latency, not cost, is the binding constraint. Output tokens dominate LLM latency, and [A-8] assumes sync generation stays under the ~30 s browser timeout. Doubling output could push a 15 s generation past 30 s and break the no-polling assumption. 1.5× buys selection freedom and grounding spares for ~50 % extra output instead of 100 %.
+- **Validation precedes selection.** Every pool question is grounding-checked and secret-shaped-token-checked (FR-15) **before** any selection happens. Only the surviving valid pool is eligible.
+- **Category selection (system-side, post-call):** the system **randomly picks 4–6 categories present in the valid pool**.
+  - **Decoupled from `questionCount`** — category count is a property of the document's knowledge structure, not of how many questions were requested. The two must never be coupled.
+  - **Short pool:** if the valid pool contains fewer than 4 distinct categories, selection **clamps to the number available**. Fewer than 2 → `400 DOC_TOO_SHORT`.
+- **Stratified sampling (this is what preserves the distribution guarantee):** the system draws `questionCount` questions from the valid pool **evenly across the selected categories** — each receives `floor(Q/C)` or `ceil(Q/C)`, so counts differ by ≤ 1 (e.g. 6 questions across 4 categories → 2-2-1-1).
+  - ⚠️ **A naive random draw from the pool is forbidden.** Drawing 8 at random from a 12-question pool can yield 5 questions in one category, leaving others with a single question — `avgRawScore` then rests on one observation and gap analysis becomes noise. The even distribution is the reason category scoring is meaningful, so sampling **must** be stratified.
+  - **A count of 0 is permitted** when `questionCount < categoryCount` (e.g. 5 questions across 6 categories → 1-1-1-1-1-0). The ≤ 1 invariant still holds, which is why no cap on category count is needed.
+  - **A `knowledge_categories` row is materialized only for categories that received ≥ 1 question** — eliminating the `0/0 = NaN` `avgRawScore` path.
+- **Selection is performed once per session and persisted.** Re-reading the session returns the identical quiz; the draw is never re-run. Randomness delivers replay value **across sessions**, not within one.
+- **Retry semantics (all-or-nothing now applies to the POOL):** if validation leaves fewer than `questionCount` valid questions, or fewer than 2 distinct categories, **retry the entire generation call** (1 retry strict-mode / 2 best-effort per AD-4). Questions are never partially accepted from a failed pool — but selecting a subset of a **fully validated** pool is not partial acceptance, because every question in the final quiz passed the same checks and positions are contiguous `0..Q-1` by construction.
+- **Consequences:** Vitest covers (a) strategy enum required (Zod), (b) pool size = `ceil(Q × 1.5)`, (c) every pool question grounding-checked before selection, (d) selected category count in [4,6] or clamped to available, (e) stratified draw yields per-category counts differing by ≤ 1, (f) a naive-random-draw fixture is rejected, (g) selection is stable across re-reads of the session.
 
 #### FR-3: LLM question generation (structured)
-[System] can generate 5–8 questions with 4 answers each, type ∈ {`single`, `multiple`}, **category from the FR-2 randomly-selected subset**.
+[System] can generate a **pool** of `ceil(questionCount × 1.5)` questions with 4 answers each, type ∈ {`single`, `multiple`}, each **tagged with a model-derived category**. The final quiz is stratified-sampled from this pool by the system (FR-2).
 - Spec archive: §7.1 step 4-5, §4.5 (LLM untrusted), §10 (provider model strings).
-- **Consequences:** Zod schema enforces exactly 4 answers, `single` requires **exactly 1** correct, `multiple` requires 2–4 correct, **category must be one of the selected subset** (Zod enum), questions distributed evenly across categories (FR-2). 2 retries for `jsonPromptInjection` providers, 1 retry for strict-mode (`minimax/MiniMax-M3`).
+- **The model is not asked to allocate questions across categories.** It produces N good questions with category tags; even distribution is achieved by the system's stratified draw (FR-2), not by the prompt. This removes the exact-counting demand that models handle poorly.
+- **Consequences:** Zod schema enforces exactly 4 answers, `single` requires **exactly 1** correct, `multiple` requires 2–4 correct, and every pool question carries a non-empty `category` string. Distribution is validated **after** the stratified draw, not on the raw pool. 2 retries for `jsonPromptInjection` providers, 1 retry for strict-mode (`minimax/MiniMax-M3`); a retry regenerates the **whole pool** (FR-2 all-or-nothing).
 
 #### FR-15: Ingest neutralization + output grounding
 [System] can use untrusted third-party markdown as quiz source material without letting it steer the model or reach the browser as markup.
@@ -171,7 +184,8 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
 #### FR-16: Bounded critical path (single LLM call) + doc-size guard
 [User] reaches a playable quiz in a single LLM call, regardless of document size, **with no map-reduce subagent orchestration**.
 - **Supersedes** spec archive §7.1 step 2 (the >12k-token map-reduce is **removed** entirely — see rationale below).
-- **Sync (critical path to `ready`):** `fetch → neutralize → chunk → select chunk budget → 1 structured LLM call (questions + categories together) → persist → return`. Chunking stays sync — it is a **prerequisite** for generation and costs milliseconds. The single LLM call generates BOTH the selected categories AND the questions tagged against them (one structured-output call, not two).
+- **Sync (critical path to `ready`):** `fetch → neutralize → chunk → select chunk budget → 1 structured LLM call (question pool, category-tagged) → validate pool → select categories → stratified-sample → persist → return`. Chunking stays sync — it is a **prerequisite** for generation and costs milliseconds.
+- **Exactly one LLM call, genuinely.** The call returns a pool of `ceil(questionCount × 1.5)` category-tagged questions; **category selection and stratified sampling are pure system-side steps performed after the call returns** (FR-2). This is what makes the single-call constraint actually satisfiable — the superseded category-pool design required a round trip between category proposal and question generation, i.e. two calls, contradicting this FR.
 - **Doc-size guard (tiered):**
   1. **HTTP body cap: 10 MB** — defensive; prevents zip-bomb OOM during streaming decode.
   2. **Decoded markdown text cap: 2 MB** — covers essentially all real-world documents (kubernetes README ~50 KB; large tutorial ~500 KB; entire docs page 1–2 MB). Hard reject with `400 DOC_TOO_LARGE` before the LLM call.
@@ -214,6 +228,7 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
 [User] must answer every question; partial submissions are rejected.
 - **Resolves** the archive's undefined behavior for skipped questions, which made `weightedFinalScore` throw on non-contiguous positions.
 - **Server is authoritative** (UI gating in FR-5 is convenience, not enforcement): `POST /submit` must carry exactly one response per session question, with the question-ID set matching the session's set exactly — else **400**.
+- **Every response must carry ≥ 1 selected position** *(decision 2026-07-19)*. An empty `selected: []` is **rejected with 400**, not scored as 0. Without this, an all-empty submission would satisfy the ID-set check and score 0 — a silent divergence where the API permits what the UI forbids. `scoreQuestion` keeps its empty→0 branch as pure-function robustness, but it is unreachable through the API.
 - **Consequences:** positions are contiguous **by construction**, so the `weightedFinalScore` position invariant holds and can never throw. `scoreQuestion` keeps its empty-selection → 0 branch for API robustness even though the UI cannot produce it.
 
 #### FR-7: Idempotent submission + inline results + insights
@@ -235,6 +250,7 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
   ```
 - **Insights are computed at submit time** (synchronously, by `CategoryAggregatorService` + `rankWeakCategories` per FR-16) and returned inline in the same response. The chat LLM context includes the same `insights` object so it can answer gap-analysis questions conversationally without a separate fetch.
 - **Idempotency:** `UNIQUE(session_id, question_id)` on `user_responses`. Concurrent submits return the cached result.
+- **Non-`ready` submit → 409** *(decision 2026-07-19)*: the atomic `UPDATE ... WHERE status='ready'` also returns 0 rows for `pending` and `failed` sessions. Those return **409 Conflict** with the current status in the body — a state conflict, not a malformed request (400) or a missing resource (404). This is distinct from the 200 cached-result path for an already-`submitted` session.
 - **Consequences:** No `POST /api/sessions/:id/insight` endpoint. The Result UI renders the entire response inline (no separate "Analyze gaps" trigger). The chat's `topicsToStudy` and `weakCategories` are loaded into the LLM context as `system` content at session start.
 
 ### 4.3 Per-endpoint Ownership
@@ -267,11 +283,12 @@ The product demonstrates an end-to-end **LLM agent system** that respects real e
 - **Consequences:** Unit test asserts that when status='ready', the LLM context DTO omits `is_correct` and question text.
 
 #### FR-10: Chat persistence (free text, decoupled from questions; context-aware)
-[User] can revisit a session from history and see the same chat thread; chat is **free text** and **decoupled from questions** — but messages may optionally carry a `questionId` anchor for focused context.
+[User] can revisit a session from history and see the same chat thread; chat is **free text** and **fully decoupled from questions** — chat messages carry **no `questionId` anchor**.
 - Spec archive governs: §5 (chat_messages table), §7.3.
 - **Chat LLM context includes both results and insights** at session start (computed at submit time per FR-7): the system prompt contains the session's `finalScore`, `breakdown` (per-question), `categoryBreakdown`, and `insights.topicsToStudy` / `weakCategories`. The chat agent can answer gap-analysis questions like "What should I study next?" without a separate fetch. This is why no `POST /insight` endpoint exists.
 - **No pagination:** chat loads latest N=50 messages on render; older messages are archived client-side (not paginated). Keeps the data model simple — no cursor logic, no offset management, no `LIMIT/OFFSET` in queries. If a session has 50+ messages, the UI shows "view older" (loads the older batch on demand) but the hot path is unpaginated.
-- **`questionId` anchor is optional.** When the user clicks "Explain Q3" on the result page, the chat input pre-fills with template `Explain question {questionId} — I answered {correctly|incorrectly}: {user_selection}` (auto-populated from the user's stored response). The user can edit before sending. This is a UX convenience, not a coupling — chat messages are still independent units in the DB.
+- **No `questionId` anchor — chat is fully decoupled from questions (decision 2026-07-19).** `chat_messages` has **no `question_id` column**, `POST /chat` accepts **no `questionId` field**, and there is **no focused-context branch** in the chat flow. Any FK from chat to questions is coupling, and it is not wanted.
+- **"Explain Q3" is a pure client-side text prefill.** Clicking it pre-fills the chat input with `Explain question 3 — I answered {correctly|incorrectly}: {user_selection}` (auto-populated from the user's stored response); the user can edit before sending. The question reference lives **in the message text**, so no database anchor and no server-side branching are required. Chat messages remain wholly independent units.
 
 #### FR-11: Tavily tool-calling (grounded answers)
 [User] can ask questions that the chat agent answers using web search, summarized before being added to context.
@@ -312,6 +329,7 @@ Per-user gap analysis is delivered through the chat thread (FR-10). The chat LLM
 - **Mobile-native apps** — mobile IS a first-class surface (responsive web, dual-panel collapses to tabs, chat input is mobile-friendly, history sidebar collapses to slide-out). Mobile is NOT gated to desktop. A standalone native app is out of scope.
 - **Streaming chat responses** — sync HTTP, even though it means 5–30s waits on LLM calls.
 - **Non-English documents / i18n** — UI strings + LLM prompts English-only.
+- **Accessibility (WCAG / screen-reader / full keyboard-nav conformance)** — *declared out of scope 2026-07-19*. v1 is a demonstration build ([A-1]). Semantic HTML and native form controls are used throughout (so the quiz's radio/checkbox groups remain keyboard-operable by default), but no conformance target is claimed and no audit is performed. Recorded explicitly because the readiness review found accessibility neither committed to nor excluded.
 - **Production-scale traffic** — free-tier targets (Fly auto-stop + cold starts + provider rate limits) are accepted v1 constraints; horizontal scale is deferred.
 - **Multi-tenant admin / dashboard** — no ops UI; ops via Fly + Vercel + Neon dashboards directly.
 - **CI/CD pipelines** — manual deploys for v1.
@@ -369,7 +387,7 @@ The **15 active FRs** above (FR-15 – FR-17 added by the 2026-07-16 audit; FR-1
 
 1. **OQ-1:** ~~Do we wire MiniMax as a default or opt-in only?~~ **RESOLVED 2026-07-18:** Default is `minimax/MiniMax-M3` (user-specified). Groq remains opt-in via provider dropdown.
 2. **OQ-2:** ~~Should chat be available on mobile, or fully gated to desktop?~~ **RESOLVED 2026-07-19:** Mobile is a first-class surface. Chat works on mobile via the dual-panel → tabs collapse. No "best on desktop" notice.
-3. **OQ-3:** What happens if the LLM returns < 5 questions (e.g. doc too short)? *Recommendation: pad with `"general"` template questions only with user opt-in; otherwise return fewer questions with an `actualCount` field surfaced in the UI.*
+3. **OQ-3:** ~~What happens if the LLM returns < 5 questions (e.g. doc too short)?~~ **RESOLVED 2026-07-19:** retry generation **once** with a strengthened instruction; if it still under-generates, return the questions actually produced with an **`actualCount`** field surfaced in the UI. **No padding with `"general"` filler questions** — padding degrades quiz quality and the content-density guard (FR-16) already rejects genuinely too-thin documents up front. Safe by construction: geometric weights are computed for *n*, so `n < 8` scores correctly.
 
 ---
 
@@ -392,8 +410,10 @@ The **15 active FRs** above (FR-15 – FR-17 added by the 2026-07-16 audit; FR-1
 ## 10. Cross-Cutting NFRs
 
 > System-wide quality attributes that span features. Each NFR binds a release-blocking constraint.
+>
+> **`NFR-n` identifiers are canonical and stable** *(added 2026-07-19)*. Downstream artifacts (`epics.md`, stories) cite them by ID. Previously these subsections were unnumbered and the epics assigned IDs positionally, so reordering §10 would have silently repointed every citation. Do not renumber; add new NFRs at the end.
 
-### 10.1 Security (Critical — release-blocking)
+### NFR-1 · 10.1 Security (Critical — release-blocking)
 
 - **SSRF defense** (`HttpMarkdownAdapter`): expanded IP blocklist (RFC1918 + CGN `100.64/10` + Oracle IMDS `192.0.0/24` + benchmarking `198.18/15` + multicast + reserved + IPv6 ULA + 6to4 + IPv4-mapped IPv6 normalization + IDN homograph + HTTP/0.9 rejection). DNS-pin-then-validate; bind undici `Agent` to validated IP; disable redirects; **tiered size limits (10 MB HTTP body / 2 MB decoded markdown / ~500 KB token-estimated)**; 10s timeout.
 - **Per-endpoint ownership** (FR-8): every `/sessions/:id/*` route uses the `@OwnsSession()` interceptor + app-layer `WHERE user_id = ?`; returns **404** (not 403) for both not-found and not-owned. **RLS is in v1 as the 4th enforcement layer (see below) — not deferred to v2.** The interceptor + use-case + session-scope-query pattern is still the app-layer half; RLS is the database-layer half. Both must work; if either fails, the other catches.
@@ -455,7 +475,7 @@ The **15 active FRs** above (FR-15 – FR-17 added by the 2026-07-16 audit; FR-1
 - **pino redaction**: deny-list with allowlist. Always redact `Authorization`, `x-api-key`, `cookie`, `x-user-id`, `req.body.*`, all `*_KEY` env vars.
 - **CORS**: exact `WEB_ORIGIN` always. `WEB_ORIGIN_REGEX` applies **only when `NODE_ENV !== 'production'`** — in prod, exact origin only. (The archive's "reject regex matches when `x-vercel-environment: production` is absent" is **removed**: that header exists inside Vercel's runtime and is never present on a cross-origin browser request to Fly, so the check could not work.)
 
-### 10.2 Rate Limiting
+### NFR-2 · 10.2 Rate Limiting
 
 Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP — and the stricter wins.** Same table, both keys:
 
@@ -471,14 +491,14 @@ Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP �
 - **In-memory store — accepted** (decision 2026-07-16). Valid **only** while the API runs on exactly **one** machine. Fly auto-stop wiping counters on idle is fine (an idle machine is not under attack). **`max_machines_running` must be pinned to 1** — with N machines, per-machine counters silently multiply every limit by N.
 - Switch to a Redis store (Upstash free) **if and only if** the deploy ever scales out.
 
-### 10.3 Observability
+### NFR-3 · 10.3 Observability
 
 - **Langfuse** traces every LLM call: prompt, completion, latency, tokens, model, provider, cache hit/miss, sessionId, userId. Content scrubbing on chat after 7 days.
 - **pino** structured logs with redaction of API keys, cookies, auth headers.
 - **`/api/health`** checks DB + provider reachability.
 - Per-session LLM cost budget: **REMOVED 2026-07-19** — no `cost_spent` column, no per-session guard. Cost control is via free-tier provider caps + rate limits (§10.2) only.
 
-### 10.4 Testing Discipline
+### NFR-4 · 10.4 Testing Discipline
 
 - Pure scoring/aggregation → Vitest unit tests in `packages/shared/test/`.
 - API integration + security → Vitest in `apps/api/test/`.
@@ -486,26 +506,25 @@ Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP �
 - Every BMAD story must update or add tests for changed behavior.
 - **Test results include gap analysis + insights** — Vitest and Playwright suites output not just pass/fail but also the category gap analysis and any captured insights as part of the report. There is **no separate test run** for these; they're produced as a side-effect of the standard test pass. Implementation: a Vitest reporter hook + a Playwright `testInfo` annotation that pull gap data from `quiz_sessions` (post-submit fixtures).
 
-### 10.5 Frontend State
+### NFR-5 · 10.5 Frontend State
 
 - **Server state**: TanStack Query v5. Query-keys factory in `apps/web/lib/queries.ts`.
 - **Client state**: React Context (UUID, theme) + `useState` per-component + custom `useLocalStorage` hook.
 - **No Zustand, no Redux** — overkill for this scope.
 - UUID generated in `<head>` inline script **before** React hydrates (avoids first-request race).
 
-### 10.6 Deployment Topology
+### NFR-6 · 10.6 Deployment Topology
 
 - Vercel (web) + Fly.io (API) + Neon (DB). Migrations run as `fly.toml release_command` (`node dist/main.js migrate`).
 - **Base image `node:22-slim`** (not alpine — avoids native-build headaches). **The archive's `node:20-slim` is WRONG and must not be copied**: Mastra requires Node `>= 22.13.0` (§A.2), so a Node 20 image fails the `engines` check and breaks the API in the one environment that matters.
 - **`max_machines_running = 1` — required, not incidental.** The in-memory rate limiter (§10.2) is only correct on a single machine.
 - Fly free-tier caveat: `min_machines_running=1` is not available — use external cron pinging `/healthz` every 4 min to keep warm.
 - **Reaffirmed 2026-07-16:** Mastra requires Node `>= 22.13.0` (architecture-spec.md §A.2), so a Node 20 base image fails `engines` and breaks the API in the one environment that matters. Use `node:22-slim`.
-- Fly free-tier caveat: `min_machines_running=1` is not available — use external cron pinging `/healthz` every 4 min to keep warm.
 - Two health endpoints: `/healthz` (Fly, ~1 ms, process-alive only) vs `/api/health` (monitoring, deep-checks DB + providers).
 - Provider SDKs dynamic-imported in `LlmAdapter` on first use — avoids 256 MB OOM on Fly free tier.
 - Async enrichment (FR-16) runs in-process. Fly auto-stop may kill it mid-flight; that is safe **by design** — enrichment is never a correctness dependency.
 
-### 10.7 Provider Rules (v1 scope — MiniMax + OpenRouter free)
+### NFR-7 · 10.7 Provider Rules (v1 scope — MiniMax + OpenRouter free)
 
 **v1 supports two provider tiers: MiniMax (paid but cheap) and OpenRouter free models.** No other pay-as-you-go providers in scope. Adding another provider is a PRD change (out of v1 scope).
 
@@ -524,7 +543,7 @@ Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP �
   - **Free-tier caveat:** OpenRouter free models have rate-limit and SLA differences; if a free-tier call fails, fall back to MiniMax-M3 transparently (single retry).
 - **Out of v1 scope:** Anthropic / OpenAI / Groq / Ollama (each requires its own API key + pay-as-you-go budget — defer to v2). The FE provider dropdown shows MiniMax-M3 as default + OpenRouter free models as opt-in.
 
-### 10.8 Scoring (math has subtle invariants)
+### NFR-8 · 10.8 Scoring (math has subtle invariants)
 
 - Multi-answer score = `clamp(round(4 × (hits − misses) / |correct|, 2), 0, 4)` where `hits = |correct ∩ selected|`, `misses = |selected \ correct|`. Full-correct → 4. Empty → 0. **Select-all → 0.** Throws on `n<=0`. (Post-audit 2026-07-16 — supersedes `4 × hits / |correct|`, which scored select-all as full marks.)
 - Single: `type='single'` requires exactly 1 correct; multi requires 2..4 correct. Validated at LLM-output boundary.
@@ -545,18 +564,7 @@ Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP �
 
 ---
 
-## Document Status
-
-- **PRD** is `draft` and ready for review.
-- **Audit pass applied 2026-07-16** — adversarial review of the SPEC archive; 10 resolutions written in. Changed rules are marked `[REVISED]` / `[NEW]` / `[CLARIFIED]` in `.memlog.md` (Resolved Ambiguities section) and stated inline in their FRs. Headline changes: multi-answer scoring now penalizes wrong picks (select-all no longer scores 4); RLS + HMAC binding removed as non-functional; map-reduce removed entirely (single LLM call on a chunked budget; doc-size guard rejects oversized docs with model-switch hint); insight is whole-quiz only (no per-question endpoint); strategy required from user; categories randomly selected from LLM-derived pool; keyword blocklist replaced by grounding + plain-text rendering.
-- **Next BMAD workflows** (in fresh chat each):
-  1. `/bmad-architecture` — **REGENERATE** the architecture spine from this corrected PRD. ⚠️ The existing `ARCHITECTURE-SPINE.md` is **pre-audit and stale** (AD-9 RLS, AD-11 HMAC, AD-19 `node:20`, old scoring formula) and must be replaced, not extended. (`/bmad-create-architecture` is deprecated — use `/bmad-architecture`.)
-  2. `/bmad-create-epics-and-stories` — breaks 17 FRs into implementable stories. **Do not run before step 1** — story generation reads the spine, so it would inherit the stale decisions.
-  3. `/bmad-check-implementation-readiness` — resolves any PRD/architecture/story conflicts.
-  4. `/bmad-sprint-planning` — then sprint loop.
-
-
-### 10.9 Canonical adapter pattern (DTOs at boundaries)
+### NFR-9 · 10.9 Canonical adapter pattern (DTOs at boundaries)
 
 > Cross-reference: spine AD-3, architecture-spec §A.3, project-context §Architecture Rules. This section captures the v1 binding.
 
@@ -565,3 +573,19 @@ Every route is limited **twice — once keyed by `X-User-Id`, once keyed by IP �
 - **One schema per boundary:** the Zod schema in `packages/shared/src/schemas.ts` is the single source of truth for the entity's shape. It validates (a) DB rows on read, (b) HTTP bodies on write (via `ZodValidationPipe` in the driving layer), (c) LLM JSON outputs on the LLM adapter side.
 - **Frozen DTOs:** `Object.freeze(...)` is mandatory. Use cases receive `Readonly<DTO>`-equivalent values; mutation throws in strict mode. Prevents accidental shared-state bugs.
 - **No mapping layer:** DTOs are the universal currency. There is no separate `entities/` layer; we don't map entity ↔ DTO between adapter and domain. (See spine AD-3 + architecture-spec §A.3 for the canonical code pattern.)
+
+---
+
+## Document Status
+
+- **PRD** is `draft` and ready for review.
+- **Audit pass applied 2026-07-16** — adversarial review of the SPEC archive; 10 resolutions written in. Changed rules are marked `[REVISED]` / `[NEW]` / `[CLARIFIED]` in `.memlog.md` (Resolved Ambiguities section) and stated inline in their FRs. Headline changes: multi-answer scoring now penalizes wrong picks (select-all no longer scores 4); RLS + HMAC binding removed as non-functional; map-reduce removed entirely (single LLM call on a chunked budget; doc-size guard rejects oversized docs with model-switch hint); insight is whole-quiz only (no per-question endpoint); strategy required from user; categories randomly selected from LLM-derived pool; keyword blocklist replaced by grounding + plain-text rendering.
+- **Revision pass applied 2026-07-19** — corrections + decisions made during `/bmad-create-epics-and-stories`. Headline changes, each recorded in `.memlog.md`:
+  - **Reconciled drift:** FR-8 rewritten to the four-layer model (RLS reinstated as a v1 default — function-based `EXISTS`-join policies + `FORCE ROW LEVEL SECURITY` resolve the original objections); stale `POST /insight` references removed throughout (FR-12/FR-13 gone, gap analysis via chat); "17 FRs" → "15 active FRs".
+  - **`questionId` coupling removed entirely** — `chat_messages` has no `question_id`, `POST /chat` takes no `questionId`, no focused-context branch. "Explain Qn" is a pure client-side text prefill.
+  - **Edge-case decisions:** `questionCount` is user-supplied (`[5,8]`, default 8); empty `selected: []` → 400; submit on `pending`/`failed` → 409; category selection clamps to the available pool; category count decoupled from `questionCount` with 0-counts permitted and `knowledge_categories` rows only for categories with ≥ 1 question; **OQ-3 closed** (retry once, then `actualCount`, no filler padding).
+  - **⚠️ Architecture redesign — QUESTION POOL supersedes CATEGORY POOL.** The category-pool design was internally contradictory: FR-16 mandates one LLM call, but system-side category selection between category proposal and question generation requires a round trip (two calls). The single call now returns a pool of `ceil(questionCount × 1.5)` category-tagged questions; validation, category selection, and **stratified** sampling are all pure post-call system steps. This supersedes the 2026-07-16 line above ("categories randomly selected from LLM-derived pool"). See FR-2, FR-3, FR-16.
+- **Next BMAD workflows** (in fresh chat each):
+  1. `/bmad-architecture` — **RE-DISTILL the spine.** It was last regenerated 2026-07-18 (`status: final`) and is *not* pre-audit, but the 2026-07-19 memlog entries have not yet been folded in: AD-N4 must be rewritten for the question pool, AD-N2 for the genuinely-single call, AD-N1's all-or-nothing rule now applies to the pool, plus the queued fixes (drop the `POST /insight` row from the AD-N7 rate-limit table; drop the `chat_messages ↔ questions` anchor from the ERD; `questionCount`; empty-selection 400; non-`ready` 409). Do not hand-edit the rendered spine — it is memlog-derived.
+  2. ~~`/bmad-check-implementation-readiness`~~ — **DONE 2026-07-19 (run 5)**; report at `implementation-readiness-report-2026-07-19-run5.md`. Verdict NEEDS WORK → remediated same day. `epics.md` is now **5 epics / 23 stories** (Story 2.4 split into 2.4/2.5/2.6; landing → 2.7; chat retention added as 4.4). Headline fix: Story 2.4 carried the *refuted* category-feasibility rule (`reduce C until Σ min(aᵢ, ceil(Q/C)) ≥ Q`) that spine AD-N4 rejects with counter-examples — the round-3 reviewer fix reached the spine at 23:05 and never reached the epic written at 23:04.
+  3. `/bmad-sprint-planning` — then the sprint loop.
