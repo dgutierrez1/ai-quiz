@@ -1,0 +1,13 @@
+{
+  "id": "0001_session_rls",
+  "prevId": "0000_concerned_sway",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  }
+}

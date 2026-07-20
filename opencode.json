@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["./.opencode/plugins/goal.mjs", "./.opencode/plugins/odw.mjs"],
+  "command": {
+    "goal": {
+      "description": "Set a goal and auto-continue until it's met (or budget runs out).",
+      "template": "$ARGUMENTS",
+      "agent": "build"
+    }
+  }
+}

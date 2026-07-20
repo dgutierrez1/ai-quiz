@@ -5,17 +5,40 @@
   "description": "ai-quiz Next.js web app (App Router).",
   "type": "module",
   "scripts": {
-    "dev": "echo 'dev: scaffold-only; Next.js wires up in Epic 2' && exit 0",
-    "build": "echo 'build: scaffold-only; Next.js wires up in Epic 2' && exit 0",
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'test: scaffold-only; unit tests land in Epic 3' && exit 0",
-    "test:e2e": "echo 'test:e2e: scaffold-only; Playwright lands in Story 5.2' && exit 0"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@ai-quiz/shared": "workspace:*"
+    "@ai-quiz/shared": "workspace:*",
+    "@tanstack/react-query": "^5.101.2",
+    "dompurify": "3.4.12",
+    "marked": "^18.0.6",
+    "motion": "12.42.2",
+    "next": "^15.5.20",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "26.1.1",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^29.1.1",
+    "pg": "^8.22.0",
+    "postcss": "^8.5.19",
+    "tailwindcss": "4.3.3",
     "typescript": "~6.0.3",
     "vitest": "4.1.10"
   }

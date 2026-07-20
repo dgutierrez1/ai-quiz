@@ -1,0 +1,60 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.14-alpine
+        env:
+          POSTGRES_USER: ai_quiz
+          POSTGRES_PASSWORD: ai_quiz
+          POSTGRES_DB: ai_quiz
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ai_quiz -d ai_quiz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ai_quiz:ai_quiz@localhost:5432/ai_quiz
+      API_PORT: "4000"
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-quiz/shared build
+      - run: pnpm --filter @ai-quiz/test-doubles build
+      - run: pnpm --filter @ai-quiz/api db:migrate
+      - run: pnpm lint:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      # No test code in production source. These greps are the fast guard;
+      # the eslint rule `local/no-test-seams-in-src` is the authoritative one.
+      # Kept as a belt-and-braces check that survives an eslint config change.
+      - name: assert no test seams in production source
+        run: |
+          ! grep -rn "NODE_ENV === 'test'" apps/api/src --include='*.ts' \
+            | grep -v '^\s*\*' | grep -v '//' | grep .
+          ! grep -rEn "export (async )?function (set|get|reset)[A-Z].*(Mock|Fake|Stub)" \
+            apps/api/src --include='*.ts' | grep .
+
+      # The fake adapters must not survive into the production image, even as
+      # an unresolvable symlink. See the rm -rf in apps/api/Dockerfile.
+      - name: assert test-doubles absent from the production image
+        run: |
+          docker build -f apps/api/Dockerfile -t ai-quiz-api:ci .
+          docker run --rm --entrypoint sh ai-quiz-api:ci -c \
+            '! test -e node_modules/@ai-quiz/test-doubles && ! test -e packages/test-doubles'

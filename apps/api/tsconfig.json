@@ -3,8 +3,16 @@
   "compilerOptions": {
     "rootDir": "./",
     "types": ["node"],
-    "lib": ["es2025"]
+    "lib": ["es2025"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
-  "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "dist", "build", "**/*.tsbuildinfo", "src/domain/__fixtures__/**"]
+  "include": ["src/**/*", "test/**/*", "drizzle.config.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "**/*.tsbuildinfo",
+    "test/fixtures/lint-guard/**"
+  ]
 }

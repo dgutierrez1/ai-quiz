@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // apps/api/test/security/lint-guard.test.ts → repo root is 4 levels up.
 const ROOT = path.resolve(HERE, '..', '..', '..', '..');
-const FIXTURE_DIR = path.join(ROOT, 'apps/api/src/domain/__fixtures__/lint-guard');
+const FIXTURE_DIR = path.join(ROOT, 'apps/api/test/fixtures/lint-guard');
 
 function runEslint(files: string[]): { code: number; stdout: string } {
   try {

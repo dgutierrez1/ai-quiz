@@ -4,14 +4,17 @@
   "private": true,
   "description": "ai-quiz shared Zod schemas + scoring (pure functions over DTOs).",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "dev": "echo 'dev: scaffold-only; scoring land in Story 1.2' && exit 0",
-    "build": "echo 'build: scaffold-only; tsc in Story 1.2' && exit 0",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage"
   },
@@ -21,6 +24,7 @@
   "devDependencies": {
     "@types/node": "26.1.1",
     "@vitest/coverage-v8": "4.1.10",
+    "drizzle-orm": "0.45.2",
     "typescript": "~6.0.3",
     "vitest": "4.1.10"
   }

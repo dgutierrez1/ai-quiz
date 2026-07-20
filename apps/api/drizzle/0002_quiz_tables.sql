@@ -1,0 +1,15 @@
+CREATE TABLE documents (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), session_id uuid NOT NULL REFERENCES quiz_sessions(id), source_url text NOT NULL, content_markdown text NOT NULL, chunks jsonb NOT NULL, content_hash text NOT NULL, byte_size integer NOT NULL, token_estimate integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE questions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), session_id uuid NOT NULL REFERENCES quiz_sessions(id), position integer NOT NULL, text text NOT NULL, type text NOT NULL, category text NOT NULL, explanation text NOT NULL);
+CREATE UNIQUE INDEX questions_session_position_unique ON questions(session_id,position);
+CREATE TABLE answers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), question_id uuid NOT NULL REFERENCES questions(id), position integer NOT NULL, text text NOT NULL, is_correct boolean NOT NULL);
+CREATE UNIQUE INDEX answers_question_position_unique ON answers(question_id,position);
+CREATE TABLE knowledge_categories (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), session_id uuid NOT NULL REFERENCES quiz_sessions(id), name text NOT NULL, question_count integer NOT NULL, avg_raw_score numeric, strength text);
+CREATE UNIQUE INDEX knowledge_categories_session_name_unique ON knowledge_categories(session_id,name);
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY; ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+ALTER TABLE questions ENABLE ROW LEVEL SECURITY; ALTER TABLE questions FORCE ROW LEVEL SECURITY;
+ALTER TABLE answers ENABLE ROW LEVEL SECURITY; ALTER TABLE answers FORCE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_categories ENABLE ROW LEVEL SECURITY; ALTER TABLE knowledge_categories FORCE ROW LEVEL SECURITY;
+CREATE POLICY user_documents ON documents USING (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=documents.session_id AND s.user_id=current_session_user_id())) WITH CHECK (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=documents.session_id AND s.user_id=current_session_user_id()));
+CREATE POLICY user_questions ON questions USING (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=questions.session_id AND s.user_id=current_session_user_id())) WITH CHECK (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=questions.session_id AND s.user_id=current_session_user_id()));
+CREATE POLICY user_answers ON answers USING (EXISTS (SELECT 1 FROM questions q JOIN quiz_sessions s ON s.id=q.session_id WHERE q.id=answers.question_id AND s.user_id=current_session_user_id())) WITH CHECK (EXISTS (SELECT 1 FROM questions q JOIN quiz_sessions s ON s.id=q.session_id WHERE q.id=answers.question_id AND s.user_id=current_session_user_id()));
+CREATE POLICY user_categories ON knowledge_categories USING (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=knowledge_categories.session_id AND s.user_id=current_session_user_id())) WITH CHECK (EXISTS (SELECT 1 FROM quiz_sessions s WHERE s.id=knowledge_categories.session_id AND s.user_id=current_session_user_id()));
