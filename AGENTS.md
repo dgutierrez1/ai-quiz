@@ -33,7 +33,7 @@
 ## Mastra wiring (critical, easy to break)
 
 - `MastraModule.register({mastra})` from `@mastra/nestjs` MUST be imported **last** in `AppModule` imports. It ships a catch-all `@All('*')` controller that shadows every other route otherwise.
-- Node `>= 22.13.0` — pin in `package.json` `engines`. Docker base image is **`node:22-slim`**; the archive's `node:20-slim` is wrong and breaks Mastra at runtime.
+- Node **`>= 22.22.1`** — pin in `package.json` `engines` _(corrected 2026-07-19: Mastra's floor is `>= 22.13.0`, `lint-staged@17.1.0` raises it to `>= 22.22.1`; the stricter value satisfies both)_. Docker base image is **`node:22-slim`**; the archive's `node:20-slim` is wrong and breaks Mastra at runtime.
 - Use `@nestjs/platform-express` only — the NestJS adapter doesn't support Fastify.
 - Mastra model strings: `'provider/model'` (e.g., `'minimax/MiniMax-M3'`). Provider resolution via env vars, not factory code.
 - **v1 scope (2026-07-19):** MiniMax-M3 is the default. OpenRouter free models are opt-in via the FE dropdown. Anthropic / OpenAI / Groq / Ollama deferred to v2. See `Provider rules` section below.
@@ -67,7 +67,7 @@
 ## Scoring (math has subtle invariants)
 
 - Multi-answer score = `clamp(round(4 × (hits − misses) / |correct|, 2), 0, 4)` where `hits = |correct ∩ selected|`, `misses = |selected \ correct|`. Full-correct → 4. Empty → 0. **Select-all → 0.** Throws on `n<=0`.
-  - **Wrong picks cancel right picks.** Revised 2026-07-16: the old `4 × hits / |correct|` ignored wrong selections, so selecting all 4 options scored full marks on *every* `multiple` question. Do not revert.
+  - **Wrong picks cancel right picks.** Revised 2026-07-16: the old `4 × hits / |correct|` ignored wrong selections, so selecting all 4 options scored full marks on _every_ `multiple` question. Do not revert.
 - Single: `type='single'` requires exactly 1 correct; multi requires 2..4 correct. Validated at LLM-output boundary.
 - **Submissions must be complete** — one response per question, IDs matching the session set, else 400. This is what makes `weightedFinalScore`'s contiguous-position invariant hold by construction.
 - 8-question geometric weights sum to **11.4358881**, not 12.

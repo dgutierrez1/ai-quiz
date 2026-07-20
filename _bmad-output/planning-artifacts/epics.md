@@ -1,9 +1,10 @@
 ---
-stepsCompleted: ["step-01", "step-02", "step-03", "step-04"]
-updated: 2026-07-19
+stepsCompleted: ['step-01', 'step-02', 'step-03', 'step-04']
+updated: 2026-07-20
 revisions:
-  - "2026-07-19 — step-04 final validation: 6 checks passed; fixed 2 split-induced forward deps in Story 2.4 (critical-path AC and shortfall ladder claimed steps owned by 2.5/2.6) + 5 remaining untokenised breakpoint ACs"
-  - "2026-07-19 — readiness run 5 fixes: AD-N4 feasibility rule corrected (was refuted); Story 2.4 split into 2.4/2.5/2.6; Epic 2 seam declared; Langfuse + scrub + README + breakpoint stories added"
+  - "2026-07-20 — breakpoint correction propagated to per-story ACs: the Shared UI conventions block was corrected to lg=1024px but the 5 literal AC bullets still said md=768px. Fixed 3.2, 4.3, 5.1 (→ lg, structural), 5.2 Playwright (→ 1024 literal + a second sub-768 viewport for non-structural stacking), and replaced 3.3's reflow AC with an explicit no-structural-breakpoint AC per the rule that /quiz/[id] is single-column at every width. 2.7 landing left at md — correctly non-structural."
+  - '2026-07-19 — step-04 final validation: 6 checks passed; fixed 2 split-induced forward deps in Story 2.4 (critical-path AC and shortfall ladder claimed steps owned by 2.5/2.6) + 5 remaining untokenised breakpoint ACs'
+  - '2026-07-19 — readiness run 5 fixes: AD-N4 feasibility rule corrected (was refuted); Story 2.4 split into 2.4/2.5/2.6; Epic 2 seam declared; Langfuse + scrub + README + breakpoint stories added'
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-ai-quiz-2026-07-16/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-ai-quiz-2026-07-16/ARCHITECTURE-SPINE.md
@@ -23,48 +24,50 @@ This document provides the complete epic and story breakdown for the AI Quiz Age
 
 > 15 active FRs. FR-12 and FR-13 were removed 2026-07-19 (gap analysis delivered via chat, FR-10).
 
-- **FR-1: SSRF-safe markdown ingest** — fetch arbitrary user-supplied Markdown URLs without exposing internal networks (scheme allowlist, expanded IP blocklist, DNS-pin-then-validate, IDN homograph rejection, HTTP/0.9 rejection, tiered size limits, 10s timeout, redirects off). *[AD-10]*
-- **FR-2: Strategy (user-picked) + question pool with stratified category selection** — `strategy` required in `POST /sessions` (enum: factual|comprehension|mixed|trivia; no LLM proposal, no silent default); one LLM call returns a pool of `ceil(questionCount × 1.5)` category-tagged questions; the pool is validated, then the system selects a feasible category count (preferring 4–6, else any feasible `C` in `[2, min(8,m)]` per AD-N4) and **stratified-samples** the quiz evenly across them (count per category differs by ≤1). Redesigned 2026-07-19 — supersedes the category-pool design, which required two LLM calls and contradicted FR-16. *[AD-N4]*
-- **FR-3: LLM question generation (structured, single call)** — one structured-output call generates a **pool** of `ceil(questionCount × 1.5)` questions, 4 answers each, type ∈ {single, multiple}; single requires exactly 1 correct, multiple requires 2–4; every pool question carries a model-derived `category` tag. The model is **not** asked to allocate questions across categories — even distribution comes from the system's stratified draw (FR-2). *[AD-4, AD-6, AD-16, AD-N2, AD-N4]*
-- **FR-4: Provider-agnostic LLM adapter** — select any configured (provider, model) per session; default `minimax/MiniMax-M3`; OpenRouter free models opt-in; SDKs dynamic-imported. *[AD-6, AD-18]*
-- **FR-5: Quiz UI (one question at a time)** — answer + advance, prev/next, position tracking, submit at end; next/submit gated on ≥1 selected option (UI convenience; server-authoritative per FR-17). *[AD-17]*
-- **FR-6: Geometric-weighted scoring** — `Σ(rawScoreᵢ × weightᵢ) / Σ(wᵢ)`, weights `1.0 × 1.1^(i-1)`. Multi-answer: `clamp(round(4 × (hits − misses) / |correct|, 2), 0, 4)`. Wrong picks cancel right picks; select-all → 0. *[AD-16]*
-- **FR-7: Idempotent submission + inline results + insights** — `POST /submit` returns finalScore + breakdown + categoryBreakdown + insights in one response; `UNIQUE(session_id, question_id)`; atomic state transition; concurrent submits return cached result. *[AD-15, AD-16]*
-- **FR-8: Per-endpoint ownership enforcement** — four-layer: interceptor UUID-v4 validation → use-case `findByIdAndUserId` (404) → session-scoped queries → Postgres RLS (function-based EXISTS-join + FORCE); companion lint rule `@ai-quiz/no-unscoped-session-query`. *[AD-9]*
-- **FR-9: Chat-before-submit guard** — while `status='ready'`, LLM context omits `is_correct` + question text (redacted QuestionDto). *[AD-12]*
-- **FR-10: Chat persistence (free text, fully decoupled, context-aware)** — persistent per-session thread; **no `questionId` anchor**; chat LLM context includes submit-time results + insights (this is why no insight endpoint exists); latest N=50, "view older" on demand. *[AD-14]*
-- **FR-11: Tavily tool-calling (grounded answers)** — chat agent answers via web search; results dual-LLM summarized to ≤200 chars before entering context; max 2 tool iterations; post-quiz only. *[AD-13]*
-- **FR-14: Provider list endpoint** — `GET /api/config/providers` returns configured (provider, model) set (default-deny); FE renders dropdown. *[AD-6, AD-17]*
-- **FR-15: Ingest neutralization + output grounding** — deterministic (no-LLM) scrub of genuine injection vectors + NFKC normalize; never LLM-rewrite the source; structured output containment + plain-text Q/A render + grounding check + secret-shaped-token check. *[AD-N1]*
-- **FR-16: Bounded critical path (single LLM call) + doc-size guard** — sync path `fetch → neutralize → chunk → select ~8k-token budget → 1 LLM call → validate pool → select categories → stratified-sample → persist → return`; async enrichment never a correctness dependency; no map-reduce; closed-world generation (no Tavily); tiered size guard + content-density check. *[AD-N2, AD-N3, AD-18, AD-19]*
-- **FR-17: Complete submissions only** — `POST /submit` must carry exactly one response per session question, ID set matching exactly, else 400; server resolves position from `questions.position` (not request index). *[AD-N5, AD-15]*
+- **FR-1: SSRF-safe markdown ingest** — fetch arbitrary user-supplied Markdown URLs without exposing internal networks (scheme allowlist, expanded IP blocklist, DNS-pin-then-validate, IDN homograph rejection, HTTP/0.9 rejection, tiered size limits, 10s timeout, redirects off). _[AD-10]_
+- **FR-2: Strategy (user-picked) + question pool with stratified category selection** — `strategy` required in `POST /sessions` (enum: factual|comprehension|mixed|trivia; no LLM proposal, no silent default); one LLM call returns a pool of `ceil(questionCount × 1.5)` category-tagged questions; the pool is validated, then the system selects a feasible category count (preferring 4–6, else any feasible `C` in `[2, min(8,m)]` per AD-N4) and **stratified-samples** the quiz evenly across them (count per category differs by ≤1). Redesigned 2026-07-19 — supersedes the category-pool design, which required two LLM calls and contradicted FR-16. _[AD-N4]_
+- **FR-3: LLM question generation (structured, single call)** — one structured-output call generates a **pool** of `ceil(questionCount × 1.5)` questions, 4 answers each, type ∈ {single, multiple}; single requires exactly 1 correct, multiple requires 2–4; every pool question carries a model-derived `category` tag. The model is **not** asked to allocate questions across categories — even distribution comes from the system's stratified draw (FR-2). _[AD-4, AD-6, AD-16, AD-N2, AD-N4]_
+- **FR-4: Provider-agnostic LLM adapter** — select any configured (provider, model) per session; default `minimax/MiniMax-M3`; OpenRouter free models opt-in; SDKs dynamic-imported. _[AD-6, AD-18]_
+- **FR-5: Quiz UI (one question at a time)** — answer + advance, prev/next, position tracking, submit at end; next/submit gated on ≥1 selected option (UI convenience; server-authoritative per FR-17). _[AD-17]_
+- **FR-6: Geometric-weighted scoring** — `Σ(rawScoreᵢ × weightᵢ) / Σ(wᵢ)`, weights `1.0 × 1.1^(i-1)`. Multi-answer: `clamp(round(4 × (hits − misses) / |correct|, 2), 0, 4)`. Wrong picks cancel right picks; select-all → 0. _[AD-16]_
+- **FR-7: Idempotent submission + inline results + insights** — `POST /submit` returns finalScore + breakdown + categoryBreakdown + insights in one response; `UNIQUE(session_id, question_id)`; atomic state transition; concurrent submits return cached result. _[AD-15, AD-16]_
+- **FR-8: Per-endpoint ownership enforcement** — four-layer: interceptor UUID-v4 validation → use-case `findByIdAndUserId` (404) → session-scoped queries → Postgres RLS (function-based EXISTS-join + FORCE); companion lint rule `@ai-quiz/no-unscoped-session-query`. _[AD-9]_
+- **FR-9: Chat-before-submit guard** — while `status='ready'`, LLM context omits `is_correct` + question text (redacted QuestionDto). _[AD-12]_
+- **FR-10: Chat persistence (free text, fully decoupled, context-aware)** — persistent per-session thread; **no `questionId` anchor**; chat LLM context includes submit-time results + insights (this is why no insight endpoint exists); latest N=50, "view older" on demand. _[AD-14]_
+- **FR-11: Tavily tool-calling (grounded answers)** — chat agent answers via web search; results dual-LLM summarized to ≤200 chars before entering context; max 2 tool iterations; post-quiz only. _[AD-13]_
+- **FR-14: Provider list endpoint** — `GET /api/config/providers` returns configured (provider, model) set (default-deny); FE renders dropdown. _[AD-6, AD-17]_
+- **FR-15: Ingest neutralization + output grounding** — deterministic (no-LLM) scrub of genuine injection vectors + NFKC normalize; never LLM-rewrite the source; structured output containment + plain-text Q/A render + grounding check + secret-shaped-token check. _[AD-N1]_
+- **FR-16: Bounded critical path (single LLM call) + doc-size guard** — sync path `fetch → neutralize → chunk → select ~8k-token budget → 1 LLM call → validate pool → select categories → stratified-sample → persist → return`; async enrichment never a correctness dependency; no map-reduce; closed-world generation (no Tavily); tiered size guard + content-density check. _[AD-N2, AD-N3, AD-18, AD-19]_
+- **FR-17: Complete submissions only** — `POST /submit` must carry exactly one response per session question, ID set matching exactly, else 400; server resolves position from `questions.position` (not request index). _[AD-N5, AD-15]_
 
 ### NonFunctional Requirements
 
-- **NFR-1: Security (release-blocking)** — SSRF defense; four-layer ownership incl. Postgres RLS (v1 default); chat-before-submit guard; ingest neutralization + output grounding (no keyword blocklist); `X-User-Id` only (no HMAC binding); submit idempotency; pino redaction; CORS `NODE_ENV` gate (exact `WEB_ORIGIN` always; regex only when not production). *[AD-9, AD-10, AD-12, AD-N1, AD-N7, AD-N8]*
-- **NFR-2: Rate limiting** — every route limited twice (per-`X-User-Id` AND per-IP, stricter wins); Global 30/min, `POST /sessions` 5/min, `POST /chat` 20/min; 429 + `Retry-After`; in-memory store accepted ONLY with `max_machines_running = 1`. *[AD-N7, AD-19]*
-- **NFR-3: Observability** — Langfuse traces every LLM call (metadata; chat content scrubbed after 7 days); pino redaction (deny-list + allowlist); two health endpoints; per-session cost budget removed. *[AD-N9, AD-20]*
-- **NFR-4: Testing discipline** — Vitest (unit scoring/aggregation in `packages/shared`, integration + security in `apps/api`); Playwright + Page Object Model, `data-testid` + `getByTestId` only; coverage floors (scoring ≥95%, use-cases ≥80%, adapters ≥60%); every story adds/updates tests; test results include gap analysis + insights. *[AD-N10]*
-- **NFR-5: Frontend state** — TanStack Query v5 (query-keys factory `apps/web/lib/queries.ts`); React Context (UUID, theme) + `useState` + `useLocalStorage`; no Zustand/Redux; UUID generated in `<head>` before hydration. *[AD-17]*
-- **NFR-6: Deployment topology** — Vercel (web) + Fly.io (API) + Neon (DB), free tiers; base image `node:22-slim` (Node ≥22.13.0); `max_machines_running = 1` required; migrations via `fly.toml release_command`; cron keep-warm ping `/healthz` every 4 min; two health endpoints. *[AD-19, AD-20]*
-- **NFR-7: Provider rules (v1 scope)** — MiniMax (default `MiniMax-M3`, hyphen; auto caching; `MINIMAX_REGION` switch) + OpenRouter free models (opt-in; filtered `pricing.prompt = "0"`; fallback to MiniMax on failure **on the chat path only — disabled on the generation path**). Anthropic/OpenAI/Groq/Ollama deferred to v2. *[AD-6]*
-- **NFR-8: Scoring math invariants** — 8-question geometric weights sum 11.4358881; categories compare by `avgRawScore` (not `weightedScore`); strength thresholds ≥3.0 strong / ≥1.6 & <3.0 mixed / <1.6 weak; `type='single'` exactly 1 correct, `multiple` 2–4; throws on n≤0. *[AD-16, AD-N5]*
+- **NFR-1: Security (release-blocking)** — SSRF defense; four-layer ownership incl. Postgres RLS (v1 default); chat-before-submit guard; ingest neutralization + output grounding (no keyword blocklist); `X-User-Id` only (no HMAC binding); submit idempotency; pino redaction; CORS `NODE_ENV` gate (exact `WEB_ORIGIN` always; regex only when not production). _[AD-9, AD-10, AD-12, AD-N1, AD-N7, AD-N8]_
+- **NFR-2: Rate limiting** — every route limited twice (per-`X-User-Id` AND per-IP, stricter wins); Global 30/min, `POST /sessions` 5/min, `POST /chat` 20/min; 429 + `Retry-After`; in-memory store accepted ONLY with `max_machines_running = 1`. _[AD-N7, AD-19]_
+- **NFR-3: Observability** — Langfuse traces every LLM call (metadata; chat content scrubbed after 7 days); pino redaction (deny-list + allowlist); two health endpoints; per-session cost budget removed. _[AD-N9, AD-20]_
+- **NFR-4: Testing discipline** — Vitest (unit scoring/aggregation in `packages/shared`, integration + security in `apps/api`); Playwright + Page Object Model, `data-testid` + `getByTestId` only; coverage floors (scoring ≥95%, use-cases ≥80%, adapters ≥60%); every story adds/updates tests; test results include gap analysis + insights. _[AD-N10]_
+- **NFR-5: Frontend state** — TanStack Query v5 (query-keys factory `apps/web/lib/queries.ts`); React Context (UUID, theme) + `useState` + `useLocalStorage`; no Zustand/Redux; UUID generated in `<head>` before hydration. _[AD-17]_
+- **NFR-6: Deployment topology** — Vercel (web) + Fly.io (API) + Neon (DB), free tiers; base image `node:22-slim` (Node ≥22.13.0); `max_machines_running = 1` required; migrations via `fly.toml release_command`; cron keep-warm ping `/healthz` every 4 min; two health endpoints. _[AD-19, AD-20]_
+- **NFR-7: Provider rules (v1 scope)** — MiniMax (default `MiniMax-M3`, hyphen; auto caching; `MINIMAX_REGION` switch) + OpenRouter free models (opt-in; filtered `pricing.prompt = "0"`; fallback to MiniMax on failure **on the chat path only — disabled on the generation path**). Anthropic/OpenAI/Groq/Ollama deferred to v2. _[AD-6]_
+- **NFR-8: Scoring math invariants** — 8-question geometric weights sum 11.4358881; categories compare by `avgRawScore` (not `weightedScore`); strength thresholds ≥3.0 strong / ≥1.6 & <3.0 mixed / <1.6 weak; `type='single'` exactly 1 correct, `multiple` 2–4; throws on n≤0. _[AD-16, AD-N5]_
 
 ### Additional Requirements
 
 > From the Architecture Spine (29 ADs) + implementation reference §A.13 build order. **No starter template** — greenfield scaffold built from scratch (impacts Epic 1 Story 1).
 
-- **Greenfield monorepo scaffold** — pnpm workspaces: `apps/api`, `apps/web`, `packages/shared`; root TS / ESLint / Prettier; `docker-compose.yml` for local Postgres. *(No starter template.)*
-- **Hexagonal architecture enforcement** — `domain/`, `ports/`, `use-cases/` pure; `adapters/` + `driving/` hold all I/O; ESLint `no-restricted-imports` blocks NestJS/Drizzle/Mastra/undici/node:fetch in domain; domain dir has its own `tsconfig.json`. *[AD-1, AD-2]*
-- **Zod DTOs at every boundary** — `Object.freeze(Schema.parse(raw))` in every adapter; one schema per boundary in `packages/shared/src/schemas.ts`; no mapping layer. *[AD-3]*
-- **Custom ESLint rules + tooling** — `@ai-quiz/no-unscoped-session-query`, `@ai-quiz/require-data-testid`, `@ai-quiz/no-console-log` (outside adapters); Prettier 3.x + husky + lint-staged; TypeScript strict + `noUncheckedIndexedAccess` + `noImplicitOverride`; `pnpm verify` = `lint:check && typecheck && test && test:e2e && build`. *[Consistency Conventions]*
-- **Drizzle schema + migrations** — tables are created by the story that first needs them (Story 1.3 seeds only `users` + `quiz_sessions`; child tables land in their feature epics), each with the **RLS migration** pattern (function-based `current_session_user_id()` + `ENABLE` + `FORCE ROW LEVEL SECURITY` on every owned table + per-table EXISTS-join policies). *[AD-9, AD-14]*
-- **Mastra integration** — `MastraModule.register()` imported LAST in `AppModule`; model strings `'provider/model'`; `@nestjs/platform-express` only (no Fastify). *[AD-7, AD-8]*
-- **Lazy SDK loading** — default provider eager, others via `await import(...)`; avoids 256 MB Fly OOM. *[AD-18]*
-- **Two health endpoints + resilience** — `/healthz` (process-alive, Fly) vs `/api/health` (deep DB + provider checks); Drizzle init in 5-attempt retry with backoff. *[AD-20]*
-- **Deploy artifacts** — Dockerfile (`node:22-slim` multi-stage); `fly.toml` (`release_command` migrations, `max_machines_running = 1`); Vercel config; cron keep-warm. *[AD-19]*
-- **Shared UI conventions (cross-story, binding)** — *added 2026-07-19; previously each UI story asserted "is responsive" with no value to agree on.*
-  - **Single responsive breakpoint: `md` = 768 px.** Below it the result page collapses dual-panel → tabs and the history sidebar collapses → slide-out. Defined once as a Tailwind theme token and imported by every layout; **no story may hardcode its own value.** Stories 2.7, 3.2, 3.3, 5.1 and the Playwright mobile project all reference this one constant. *(Queue a memlog entry so the next spine re-distill carries it as an AD — it is a textbook "two units could choose incompatibly" invariant.)*
+- **Greenfield monorepo scaffold** — pnpm workspaces: `apps/api`, `apps/web`, `packages/shared`; root TS / ESLint / Prettier; `docker-compose.yml` for local Postgres. _(No starter template.)_
+- **Hexagonal architecture enforcement** — `domain/`, `ports/`, `use-cases/` pure; `adapters/` + `driving/` hold all I/O; ESLint `no-restricted-imports` blocks NestJS/Drizzle/Mastra/undici/node:fetch in domain; domain dir has its own `tsconfig.json`. _[AD-1, AD-2]_
+- **Zod DTOs at every boundary** — `Object.freeze(Schema.parse(raw))` in every adapter; one schema per boundary in `packages/shared/src/schemas.ts`; no mapping layer. _[AD-3]_
+- **Custom ESLint rules + tooling** — ESLint 10 flat config; rules live as a plugin object in `packages/eslint-plugin-local/` (`--rulesdir` was removed in ESLint 10) and **each ships with the code it guards**: `@ai-quiz/no-unscoped-session-query` → Story 1.4, `@ai-quiz/require-data-testid` → first UI stories, `@ai-quiz/no-console-log` → built-in `no-console` with a path override (no custom rule needed). Prettier 3.9.5 + husky 9.1.7 + lint-staged 17.1.0; TypeScript strict + `noUncheckedIndexedAccess` + `noImplicitOverride`; `pnpm verify` = `lint:check && typecheck && test && test:e2e && build`, where **`lint:check` = `eslint . --max-warnings=0`**. ⚠️ Toolchain pins live in `ARCHITECTURE-SPINE.md#Stack` and `project-context.md#Technology Stack` — both corrected and in sync 2026-07-19; the Stack table carries the full trap list. _[Consistency Conventions]_
+- **Drizzle schema + migrations** — tables are created by the story that first needs them (Story 1.3 seeds only `users` + `quiz_sessions`; child tables land in their feature epics), each with the **RLS migration** pattern (function-based `current_session_user_id()` + `ENABLE` + `FORCE ROW LEVEL SECURITY` on every owned table + per-table EXISTS-join policies). _[AD-9, AD-14]_
+- **Mastra integration** — `MastraModule.register()` imported LAST in `AppModule`; model strings `'provider/model'`; `@nestjs/platform-express` only (no Fastify). _[AD-7, AD-8]_
+- **Lazy SDK loading** — default provider eager, others via `await import(...)`; avoids 256 MB Fly OOM. _[AD-18]_
+- **Two health endpoints + resilience** — `/healthz` (process-alive, Fly) vs `/api/health` (deep DB + provider checks); Drizzle init in 5-attempt retry with backoff. _[AD-20]_
+- **Deploy artifacts** — Dockerfile (`node:22-slim` multi-stage); `fly.toml` (`release_command` migrations, `max_machines_running = 1`); Vercel config; cron keep-warm. _[AD-19]_
+- **Shared UI conventions (cross-story, binding)** — _added 2026-07-19; previously each UI story asserted "is responsive" with no value to agree on._
+  - **Structural breakpoint: `lg` = 1024 px** _(corrected 2026-07-20 — was `md` = 768 px)_. Below it the result page collapses dual-panel → tabs and the history sidebar collapses → slide-out sheet. `md` = 768 px remains in use, but **only** for non-structural stacking (landing form and history list stack vertically, both full-width); it never governs panel or sidebar collapse. Defined once as Tailwind theme tokens and imported by every layout; **no story may hardcode its own value.** Stories 2.7, 3.2, 3.3, 5.1 and the Playwright mobile project all reference these constants. _[AD-21]_ — consume Tailwind's built-in `lg` (`--breakpoint-lg`, `64rem` = 1024 px) and `md` (`--breakpoint-md`, `48rem` = 768 px); **do not redeclare them**, and note Tailwind 4 theme tokens live in CSS `@theme`, not `tailwind.config.js`. Non-CSS consumers (Playwright viewport) use the literals `1024` / `768`.
+    - **Why `lg` and not `md`:** at 768 px the 58/42 dual panel yields ~445 px of results beside ~322 px of chat — a chat column too narrow to use and a results column below comfortable reading measure. Tablet portrait belongs in the tabbed layout. This matches `DESIGN.md` ("the `lg` (1024 px) boundary is the one that matters") and `EXPERIENCE.md` §Breakpoints, both `status: final`; the earlier single-`md` rule was written on 2026-07-19 while the "UX Design Requirements" section still read _"no UX design contract exists"_, and the UX artifacts landing the same day superseded it.
+    - `/quiz/[id]` is **single-column at every width** and has no structural breakpoint at all — one question card in a reading measure. Story 3.3 must not introduce one.
   - **`data-testid` on every interactive element**, lint-enforced via `@ai-quiz/require-data-testid`; tests use `getByTestId(...)` only.
   - **Shared empty / loading / error state components** live in `apps/web/components/states/` and are reused rather than re-implemented per surface.
 - **README** (PRD §6.1 in-scope deliverable, build order step 17) — documents run, env vars, scoring rules, security posture, and deploy. Owned by Story 5.3 as part of the release gate.
@@ -72,7 +75,9 @@ This document provides the complete epic and story breakdown for the AI Quiz Age
 
 ### UX Design Requirements
 
-_None — no UX design contract exists for this project. UI/interaction requirements are carried inline in FR-5 (quiz UI), FR-10 (chat/result dual-panel, mobile-first collapse to tabs, history sidebar), UJ-1..UJ-4 (PRD §2.3), and NFR-5 (frontend state). Mobile is a first-class surface (OQ-2 resolved 2026-07-19)._
+_Updated 2026-07-20 — a UX design contract now exists and is binding:_ `planning-artifacts/ux-designs/ux-ai-quiz-2026-07-19/DESIGN.md` (brand layer, tokens, component specs, breakpoint table) and `EXPERIENCE.md` (surface inventory, states, per-breakpoint layout matrix, user journeys), both `status: final`. **On any UI/layout conflict these two win over prose carried inline elsewhere in this file or the PRD** — see the `lg` breakpoint correction above.
+
+UI/interaction requirements are additionally carried inline in FR-5 (quiz UI), FR-10 (chat/result dual-panel, mobile-first collapse to tabs, history sidebar), UJ-1..UJ-4 (PRD §2.3), and NFR-5 (frontend state). Mobile is a first-class surface (OQ-2 resolved 2026-07-19).
 
 ### FR Coverage Map
 
@@ -97,29 +102,34 @@ _None — no UX design contract exists for this project. UI/interaction requirem
 ## Epic List
 
 ### Epic 1: Foundation, Security Spine & Deployable Skeleton
+
 Stand up the greenfield monorepo, the fully-tested scoring engine, the DB + RLS migration, the reusable ownership/security substrate, observability, and the deploy pipeline — so every later feature inherits security and ships to a live skeleton. **Exit criterion (walking skeleton, not a config checklist):** a live ownership-enforced `POST /sessions` stub that persists a row, returns 404 on cross-user access, passes through the per-user+IP throttler, and responds via the deployed Fly skeleton (`/healthz` 200) — plus the scoring engine green at ≥95% Vitest coverage.
 **FRs covered:** FR-6, FR-8 (mechanism: `@OwnsSession()` interceptor + AsyncLocalStorage `SET LOCAL` + Postgres RLS + `@ai-quiz/no-unscoped-session-query` lint rule)
 **NFRs / additional:** NFR-1, NFR-2, NFR-3, NFR-6, NFR-8 · scaffold, hexagonal enforcement (ESLint `no-restricted-imports`), Zod-DTO boundary, tooling/`pnpm verify`, Drizzle `users`/`quiz_sessions` schema + RLS migration (child tables deferred to their feature epics), two health endpoints, Dockerfile `node:22-slim` + `fly.toml`
 
 ### Epic 2: Generate a grounded quiz from any URL
+
 A user pastes a Markdown URL, picks a provider + strategy, and gets a playable quiz whose questions are grounded in the document. Establishes the FE state substrate (TanStack Query + UUID context) and the landing UI (URL input, provider dropdown, strategy picker, Start).
 **FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-14, FR-15, FR-16
 **NFRs:** NFR-7 (MiniMax default + OpenRouter free), NFR-5 (FE state established here)
 **Deliverable:** pipecat & langchain READMEs each produce a **`status='ready'` grounded quiz, verified by API + integration test** (SM-1); SSRF security suite green; closed-world generation with tiered doc-size + content-density guard; landing page reaches `ready` and routes onward.
-**Known seam:** the quiz is not yet *playable in the browser* — `/quiz/[id]` is Story 3.3 (Epic 3), which must land after the submit endpoint (3.1) and result page (3.2) it depends on. Epic 2's exit is verified at the API layer, not by a manual click-through.
+**Known seam:** the quiz is not yet _playable in the browser_ — `/quiz/[id]` is Story 3.3 (Epic 3), which must land after the submit endpoint (3.1) and result page (3.2) it depends on. Epic 2's exit is verified at the API layer, not by a manual click-through.
 
 ### Epic 3: Take the quiz & get graded results with insights
+
 A user answers one question at a time, submits a complete set, and sees final score + per-category breakdown + insights inline on a dual-panel result page. **First UI story builds the dual-panel result shell with an empty/disabled chat slot** (the extension point Epic 4 mounts into).
 **FRs covered:** FR-5, FR-17, FR-7 (consumes the Epic-1 scoring engine)
 **Deliverable:** answer → submit → inline score/breakdown/insights; idempotent retry never double-scores; per-endpoint ownership isolation test for submit/result routes.
 
 ### Epic 4: Chat, follow-ups & gap analysis
+
 Persistent per-session chat mounted into the Epic-3 result-page chat slot: pre-submit answer-exfil guard, Tavily-grounded answers (dual-LLM sanitized), and gap analysis delivered conversationally from the submit-time insights (no separate insight endpoint).
 **FRs covered:** FR-9, FR-10, FR-11
 **NFRs:** NFR-3 (chat retention — 7-day scrub, Story 4.4)
 **Deliverable:** per-session chat thread persists across revisits; pre-submit guard test green; "What should I study next?" answered from `topicsToStudy[]`; per-endpoint ownership isolation test for chat routes.
 
 ### Epic 5: Revisit history on any device
+
 History sidebar listing all prior sessions, session revisit at `/result/[id]`, mobile-first responsive behavior (dual-panel → tabs, sidebar → slide-out), and resume of `pending` sessions — closed out by the end-to-end happy-path and cross-user isolation E2E specs.
 **FRs covered:** FR-8 (final end-to-end cross-user isolation validation across all endpoints)
 **NFRs:** NFR-4 (full Playwright POM suite: `landing.spec.ts`, `full-quiz.spec.ts`, `chat.spec.ts`, `security.spec.ts`)
@@ -156,7 +166,7 @@ So that every change is boundary-safe and checked from the first commit.
 
 **Given** `docker-compose.yml`,
 **When** `docker compose up`,
-**Then** a local Postgres 16 instance is reachable for dev.
+**Then** a local Postgres 16 instance (`postgres:16.14-alpine`, port 5432, db `ai_quiz`) is reachable for dev.
 
 ### Story 1.2: Scoring engine in `packages/shared` (fully tested)
 
@@ -207,7 +217,7 @@ So that the service boots, connects to Postgres, and reports liveness.
 
 **Given** the NestJS app,
 **Then** `apps/api/src` contains `domain/`, `ports/`, `use-cases/`, `adapters/`, `driving/`,
-**And** it boots on `@nestjs/platform-express` with Node `>= 22.13.0` pinned in `engines`.
+**And** it boots on `@nestjs/platform-express` with Node **`>= 22.22.1`** pinned in `engines` (Mastra floor 22.13.0; `lint-staged@17` raises it).
 
 **Given** Drizzle setup,
 **Then** migrations create only the `users` and `quiz_sessions` tables (child tables deferred to their feature epics).
@@ -649,9 +659,10 @@ So that I understand my performance at a glance.
 **Given** a submitted session,
 **Then** the results panel shows `finalScore`, the per-question breakdown, `categoryBreakdown`, and `insights` inline, with no separate "Analyze gaps" trigger.
 
-**Given** a viewport narrower than the shared `md` breakpoint (768 px),
+**Given** a viewport narrower than the shared **structural** breakpoint `lg` (1024 px),
 **Then** the dual-panel layout collapses to tabs (results tab + chat tab),
-**And** the breakpoint is read from the shared token, never hardcoded in this story.
+**And** the breakpoint is read from the shared token, never hardcoded in this story,
+**And** `md` (768 px) must **not** govern this collapse — using it here is a defect _[AD-21]_.
 
 **Given** all interactive elements,
 **Then** they have `data-testid`,
@@ -685,9 +696,10 @@ So that I can take the quiz and get graded.
 **Given** all interactive elements,
 **Then** they have `data-testid`.
 
-**Given** a viewport narrower than the shared `md` breakpoint (768 px),
-**Then** the quiz UI reflows to single-column with full-width answer targets,
-**And** the breakpoint is read from the shared token, never hardcoded in this story.
+**Given** any viewport width,
+**Then** `/quiz/[id]` is **single-column at every width** — one question card held to a comfortable reading measure — and introduces **no structural breakpoint at all**,
+**And** answer targets are full-width within that measure,
+**And** this story must not add a dual-panel or sidebar collapse _[AD-21]_.
 
 ---
 
@@ -786,10 +798,10 @@ So that I can ask questions and get study guidance conversationally.
 **Then** DOMPurify sanitizes it (scoped to chat + explanations only) with `rel="noopener noreferrer"` on `target="_blank"`,
 **And** question and answer text still render as plain text.
 
-**Given** a viewport narrower than the shared `md` breakpoint (768 px),
+**Given** a viewport narrower than the shared **structural** breakpoint `lg` (1024 px),
 **Then** chat is reachable via the chat tab and the input is mobile-friendly,
-**And** the breakpoint is read from the shared token, never hardcoded in this story.
-
+**And** the breakpoint is read from the shared token, never hardcoded in this story,
+**And** it must match the value Story 3.2 collapses on — the panel and its host cannot disagree _[AD-21]_.
 
 ### Story 4.4: Chat content retention (7-day scrub)
 
@@ -836,9 +848,10 @@ So that I can review what I got wrong later, on any device.
 **Then** it lists prior sessions with source URL, status, and created date,
 **And** all interactive elements have `data-testid`.
 
-**Given** a viewport narrower than the shared `md` breakpoint (768 px),
-**Then** the sidebar collapses to a slide-out,
-**And** the breakpoint is read from the shared token, never hardcoded in this story.
+**Given** a viewport narrower than the shared **structural** breakpoint `lg` (1024 px),
+**Then** the sidebar collapses to a slide-out sheet,
+**And** the breakpoint is read from the shared token, never hardcoded in this story,
+**And** `md` (768 px) governs only the non-structural stacking of the history list itself, never the sidebar collapse _[AD-21]_.
 
 **Given** a submitted session is clicked,
 **Then** it navigates to `/result/[id]`,
@@ -885,9 +898,10 @@ So that regressions in the user flow are caught before release.
 **Then** it covers a post-submit message receiving a grounded response,
 **And** the client-side "Explain Qn" prefill.
 
-**Given** a Playwright mobile viewport project sized below the shared `md` breakpoint (768 px),
+**Given** a Playwright mobile viewport project sized below the shared **structural** breakpoint `lg` (1024 px),
 **Then** the happy path passes with dual-panel → tabs and sidebar → slide-out,
-**And** the project's viewport width derives from the same shared token as the components.
+**And** the project states the literal `1024` — Playwright sets integer viewports and cannot derive from `64rem` without assuming a root font size, so the literal is stated with the rem↔px equivalence as its documented basis _[AD-21]_,
+**And** a second viewport below `md` (768 px) additionally exercises the non-structural stacking of the landing form and history list.
 
 **Given** CI,
 **Then** the run order is `shared → api → web:e2e`,

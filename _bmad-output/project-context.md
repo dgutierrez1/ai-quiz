@@ -1,7 +1,8 @@
 ---
-project_name: "ai-quiz"
-sections_completed: ["technology_stack", "architecture_rules", "security_rules", "testing_rules", "workflow_rules"]
-last_updated: "2026-07-19"
+project_name: 'ai-quiz'
+sections_completed:
+  ['technology_stack', 'architecture_rules', 'security_rules', 'testing_rules', 'workflow_rules']
+last_updated: '2026-07-19'
 ---
 
 # Project Context — ai-quiz
@@ -17,6 +18,25 @@ This document is the **constitution** for the ai-quiz project. It is auto-loaded
 > **Audit note (2026-07-16):** the rules below marked ⚠️ **REMOVED** were deliberately deleted as non-functional or harmful. They still appear in the SPEC archive and in the pre-audit architecture spine. **Do not reintroduce them.**
 
 ## Technology Stack
+
+> ⚠️ **Toolchain versions corrected 2026-07-19** (web-verified during Story 1.1 authoring, then folded into the spine). `ARCHITECTURE-SPINE.md#Stack` is now **in sync** with this table and carries the full trap list — either is canonical. See memlog entries 90–94.
+
+**Pinned toolchain (do not drift):**
+
+| Package             | Pin                                            | Why this exact value                                                                                                                                                                                                                                                                                     |
+| ------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm`              | **11.15.1** (`packageManager: "pnpm@11.15.1"`) | Decision 2026-07-19 (was `9.x`).                                                                                                                                                                                                                                                                         |
+| `typescript`        | **`~6.0.3`** (`>=6.0.3 <6.1.0`)                | 🔴 `latest` = 7.0.2 (the Go rewrite) ships **no Compiler API** until 7.1. `typescript-eslint@8.64.0` peers `typescript >=4.8.4 <6.1.0` → installing latest crashes ESLint. Use `~`, not an exact pin — a hard pin also blocks a future 6.0.4 patch. TS 7 installs side-by-side if you want `tsgo` speed. |
+| `node` (`engines`)  | **`>=22.22.1`**                                | AD-8 says `>=22.13.0`, but `lint-staged@17.1.0` needs `>=22.22.1`. Stricter value satisfies both. Docker base stays `node:22-slim`.                                                                                                                                                                      |
+| `eslint`            | 10.7.0                                         | eslintrc **fully removed**; flat config only; `--rulesdir` removed                                                                                                                                                                                                                                       |
+| `typescript-eslint` | 8.64.0 (meta-package)                          | use `parserOptions.projectService: true`, **not** `project: [globs]`                                                                                                                                                                                                                                     |
+| `prettier`          | 3.9.5                                          |                                                                                                                                                                                                                                                                                                          |
+| `husky`             | 9.1.7                                          | `husky install` is **deprecated, not removed** (warns and still runs in 9.1.7; `add`/`set`/`uninstall` exit 1). Use `"prepare": "husky"` + `husky init`.                                                                                                                                                 |
+| `lint-staged`       | 17.1.0                                         | not early 17.0.x (staging-bug regression); config in `package.json`, not `.lintstagedrc`                                                                                                                                                                                                                 |
+| `vitest`            | 4.1.10                                         | `vitest.workspace.ts` **removed in v4** → `test.projects`                                                                                                                                                                                                                                                |
+| Postgres (docker)   | `postgres:16.14-alpine`                        | bullseye is **frozen at `16.9-bullseye`**, not gone. The bare `postgres:16.14` tag moved to **trixie** — pinning it silently changes distro.                                                                                                                                                             |
+
+**pnpm 11 migration footguns** — all settings move from `.npmrc` (now registry/auth only) into `pnpm-workspace.yaml`; the `pnpm` field in `package.json` is **silently ignored**, so `overrides` and `patchedDependencies` left there vanish with no warning; `onlyBuiltDependencies` → `allowBuilds`; two new install-breaking defaults: `minimumReleaseAge: 1440` and `blockExoticSubdeps: true`.
 
 - Monorepo: pnpm workspaces (3 packages: `apps/api`, `apps/web`, `packages/shared`)
 - Backend: NestJS 11.1.28 + `@mastra/nestjs` adapter + Drizzle ORM 0.45.2 + Postgres (Neon free). ⚠️ This file said **NestJS 10** until 2026-07-19; the spine and `architecture-spec.md` both pin **11.1.28** (web-verified during the architecture run). 11 is correct — do not revert.
@@ -41,20 +61,20 @@ This document is the **constitution** for the ai-quiz project. It is auto-loaded
 **Mastra integration (critical):**
 
 - `@mastra/nestjs`'s `MastraModule.register({mastra})` ships a catch-all `@All('*')` controller. **It MUST be imported last** in `AppModule` imports — otherwise it shadows every NestJS route.
-- Node `>= 22.13.0` (pin in `package.json` `engines`).
+- Node **`>= 22.22.1`** (pin in `package.json` `engines`) — Mastra's floor is `>= 22.13.0`, `lint-staged@17.1.0` raises it to `>= 22.22.1`; the stricter value satisfies both. See the pinned-toolchain table above.
 - Use `@nestjs/platform-express` only (Mastra adapter does not support Fastify).
 - Mastra model strings: `'provider/model'` format (e.g., `'minimax/MiniMax-M3'`).
 - Docker base image **`node:22-slim`**. ⚠️ The archive + pre-audit spine say `node:20-slim` — that is **wrong and build-breaking** (fails the `>= 22.13.0` engines check, breaks Mastra in prod).
 
 **Quiz generation flow (bounded critical path):**
 
-- **Sync — all work needed to reach `status='ready'`:** `fetch → neutralize → chunk → select ~8k-token chunk budget → 1 structured LLM call (question pool) → validate pool → select categories → stratified-sample → persist → return`. Chunking stays sync — it is a *prerequisite* for generation and costs milliseconds.
+- **Sync — all work needed to reach `status='ready'`:** `fetch → neutralize → chunk → select ~8k-token chunk budget → 1 structured LLM call (question pool) → validate pool → select categories → stratified-sample → persist → return`. Chunking stays sync — it is a _prerequisite_ for generation and costs milliseconds.
 - **Question pool, not category pool (redesign 2026-07-19).** The one LLM call returns a pool of `ceil(questionCount × 1.5)` **category-tagged** questions. Category selection (4–6, clamped to what the pool contains) and the **stratified** even draw are **pure system-side steps after the call returns**. The superseded category-pool design needed a round trip between category proposal and question generation — i.e. two calls — which contradicted the single-call rule. ⚠️ **The draw must be stratified by category, never a naive random draw across the pool**, or per-category question counts skew and `avgRawScore` stops being comparable. All-or-nothing retry applies to the **pool**: if fewer than `questionCount` questions survive grounding validation, regenerate the whole pool — never partially accept.
 - **Async — `void enrich(sessionId)` after the response is sent:** full document + chunk persistence, chat cache prefix, `knowledge_categories` aggregates, Langfuse flush. (Map-reduce was removed entirely — see FR-16; bounded critical path is one LLM call.)
 - **No queue, no Redis, no BullMQ.**
 - **Invariant:** enrichment is an **optimization, never a correctness dependency**. If Fly auto-stop kills it mid-flight, chat / gap-analysis finds no enrichment and computes on demand. Never write code that assumes enrichment ran.
 - ⚠️ **Map-reduce must NEVER sit on the generation critical path** — that was the pre-audit design's timeout risk.
-- **Generation is closed-world: NO Tavily / web search.** The only network call on the generation path is the single `ssrf-safe-fetch` of `sourceUrl` — that fetch *is* the knowledge base. Tavily is confined to insight + chat, both post-quiz. The grounding check depends on this closed-world property.
+- **Generation is closed-world: NO Tavily / web search.** The only network call on the generation path is the single `ssrf-safe-fetch` of `sourceUrl` — that fetch _is_ the knowledge base. Tavily is confined to insight + chat, both post-quiz. The grounding check depends on this closed-world property.
 
 ## Scoring Rules (subtle invariants — do not revert)
 
@@ -115,7 +135,7 @@ Treat as **release-blocking**:
    - **Structured output is the containment** — an injection saying "emit `<script>`" only puts a string in `question.text`; it cannot escape the schema.
    - **Question + answer text renders as PLAIN TEXT, never markdown/HTML** (`{text}` auto-escapes). This kills the XSS path at the source.
    - **DOMPurify scoped to explanations + chat only** (the only surfaces that genuinely need markdown), with `rel="noopener noreferrer"` on `target="_blank"`
-   - **Grounding check** — reject questions with no meaningful token overlap against any source chunk. Catches injection *by its effect*, not by keyword.
+   - **Grounding check** — reject questions with no meaningful token overlap against any source chunk. Catches injection _by its effect_, not by keyword.
    - **Secret-shaped-token check relative to source** — output matching `sk-[A-Za-z0-9]{20,}`, `AKIA…`, or long high-entropy strings **not present in the source doc** → retry.
    - `isRefusal()` graceful handling
    - ⚠️ **REMOVED — `outputLooksUnsafe()` keyword blocklist** (`api_key`, `password`, `DROP TABLE`, `<script>`, `javascript:`). It false-positived on exactly the DB/security READMEs this app targets — a quiz about SQL injection would be marked `failed` — while protecting nothing the controls above don't already cover. A quiz answer containing `DROP TABLE` is harmless when it renders as plain text and is grounded in the source.
@@ -124,7 +144,7 @@ Treat as **release-blocking**:
    - `X-User-Id` only. Validate UUID v4 at the boundary.
    - **Per-route rate limits keyed by BOTH `X-User-Id` and IP; stricter wins** (see rule 7). The IP key is the real control.
    - ⚠️ **REMOVED — HMAC binding (`X-User-Hmac` / `USER_HMAC_SECRET`).** The browser had to compute it, so the "secret" shipped client-side and any attacker forged valid HMACs as cheaply as the app. Zero security value + quarterly rotation that breaks live clients. (Rejected alternative: server-issued signed token — real security, but contradicts browser-generated UUID.)
-   - ⚠️ **REMOVED — "5 req/sec/IP" fallback.** It was *looser* than the 30/min per-user limit it backed (300/min vs 30/min), handing a UUID-rotating attacker a 10× budget increase.
+   - ⚠️ **REMOVED — "5 req/sec/IP" fallback.** It was _looser_ than the 30/min per-user limit it backed (300/min vs 30/min), handing a UUID-rotating attacker a 10× budget increase.
 
 7. **NestJS hardening**:
    - helmet with custom CSP, HSTS 2y + preload
@@ -157,7 +177,8 @@ Treat as **release-blocking**:
 - **ESLint flat config** at repo root. Mandatory custom rules: `@ai-quiz/no-unscoped-session-query` (catches `WHERE session_id = ?` outside a `forUser*` context — companion to the 4-layer ownership enforcement); `@ai-quiz/require-data-testid`; `@ai-quiz/no-console-log` outside `apps/api/src/adapters/`. TypeScript ESLint plugin for type-aware rules.
 - **Prettier 3.x** at repo root (`.prettierrc`). Runs on pre-commit + pre-push + CI. Single source of formatting truth.
 - **TypeScript strict** (`strict: true` + `noUncheckedIndexedAccess: true` + `noImplicitOverride: true`); `tsconfig.base.json` shared, per-package override.
-- **`pnpm verify`** is the CI gate = `lint:check && typecheck && test && test:e2e && build`.
+- **`pnpm verify`** is the CI gate = `lint:check && typecheck && test && test:e2e && build`. **`lint:check` = `eslint . --max-warnings=0`** (defined 2026-07-19 — `verify` referenced it but no doc ever defined it; fail-on-warning, no autofix, correct for a gate). `format:check` is enforced by a `.husky/pre-push` hook rather than inside `verify`.
+- **Custom ESLint rules ship with the code they guard, not all at once.** ESLint 10 removed `--rulesdir`, so they live as a plugin object in `packages/eslint-plugin-local/`. Story 1.1 builds the harness + `no-restricted-imports` only; `@ai-quiz/no-unscoped-session-query` lands in Story 1.4 with its fixtures; `@ai-quiz/require-data-testid` with the first UI stories. `@ai-quiz/no-console-log` needs **no custom rule** — built-in `no-console` with a path override outside `apps/api/src/adapters/` does it. A rule written against code that doesn't exist can't be tested.
 
 ## Workflow Rules
 
