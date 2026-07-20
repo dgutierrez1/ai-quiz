@@ -14,12 +14,22 @@
  * This file IS the plugin. Wired into the root `eslint.config.js`.
  */
 
+import noTestSeamsInSrc from './rules/no-test-seams-in-src.js';
+import noUnscopedSessionQuery from './rules/no-unscoped-session-query.js';
+
 const plugin = {
   meta: {
     name: '@ai-quiz/eslint-plugin-local',
     version: '0.0.0',
   },
-  rules: {},
+  rules: {
+    // Story 1.4 — the dev-time half of the four-layer ownership model.
+    // Postgres RLS is the runtime half; both are required (constitution rule 2).
+    'no-unscoped-session-query': noUnscopedSessionQuery,
+    // Keeps mock seams and NODE_ENV==='test' branches out of apps/api/src.
+    // Ships with the structural split that removed the originals.
+    'no-test-seams-in-src': noTestSeamsInSrc,
+  },
 };
 
 export default plugin;

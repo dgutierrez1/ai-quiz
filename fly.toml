@@ -1,0 +1,58 @@
+# Fly.io configuration for the ai-quiz API.
+# Single-machine constraint (AD-20, story 1.6): Postgres / app share one
+# machine and a stateless horizontal scale-out is forbidden.
+app = "ai-quiz-api"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = "15s"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+# Migrations run once per release, BEFORE the new machines take traffic.
+# Without this the schema is never advanced on deploy and the app boots against
+# an out-of-date database (AD-19 / story 1.6). `migrate` exits without binding
+# a port, so the release step terminates instead of hanging.
+[deploy]
+  release_command = "node dist/main.js migrate"
+
+[env]
+  NODE_ENV = "production"
+  API_PORT = "4000"
+  # TODO(deploy): replace with the real Vercel origin before first deploy.
+  # CORS matches this EXACTLY in production (WEB_ORIGIN_REGEX is ignored when
+  # NODE_ENV=production), so a placeholder here blocks the real frontend with a
+  # CORS error that looks like an app bug rather than a config one.
+  WEB_ORIGIN = "https://ai-quiz.example"
+  # The in-memory rate limiter is only correct on ONE machine. This mirrors
+  # max_machines_running below for the boot-time guard, which reads the env var.
+  MAX_MACHINES_RUNNING = "1"
+
+[[services]]
+  internal_port = 4000
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 1
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+    force_https = true
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "get"
+    path = "/healthz"

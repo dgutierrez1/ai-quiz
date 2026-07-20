@@ -1,0 +1,191 @@
+/*
+ * Tailwind 4.3.3 CSS-first design tokens (Story 2.7).
+ *
+ * Source of truth: _bmad-output/planning-artifacts/ux-designs/ux-ai-quiz-2026-07-19/DESIGN.md
+ * Peer spec:      EXPERIENCE.md (form fields, narration copy, a11y floor).
+ *
+ * Tokens are declared via Tailwind 4's `@theme` directive. Dark mode is
+ * driven by `prefers-color-scheme: dark` — no manual toggle UI is required
+ * by any Story 2.7 AC. The brand-layer delta on top of shadcn defaults is
+ * declared here; everything else inherits shadcn untouched.
+ *
+ * Strength chips are wired here (global @theme) so future stories can
+ * consume them — Story 2.7 itself does not render strength chips.
+ */
+
+@import 'tailwindcss';
+
+@theme {
+  /* ── Brand colors (light + dark pairs) ─────────────────────────────────── */
+  --color-surface-base: #faf8f5;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f1ede7;
+  --color-ink: #2a2723;
+  --color-ink-muted: #6b655d;
+  --color-primary: #3f6b7d;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #a85a2b;
+  --color-accent-foreground: #ffffff;
+  --color-strength-strong: #4a7c59;
+  --color-strength-mixed: #8a6420;
+  --color-strength-weak: #a8574b;
+  --color-strength-foreground: #ffffff;
+
+  /* ── Typography roles (DESIGN.md frontmatter) ───────────────────────────── */
+  --font-display: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-reading: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-question: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-score: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-code: 'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-display: 30px;
+  --text-display--line-height: 1.2;
+  --text-display--letter-spacing: -0.01em;
+  --text-display--font-weight: 600;
+
+  --text-score: 56px;
+  --text-score--line-height: 1;
+  --text-score--letter-spacing: -0.02em;
+  --text-score--font-weight: 600;
+
+  --text-reading: 17px;
+  --text-reading--line-height: 1.65;
+  --text-reading--font-weight: 400;
+
+  --text-question: 20px;
+  --text-question--line-height: 1.5;
+  --text-question--font-weight: 500;
+
+  --text-code: 14px;
+  --text-code--line-height: 1.6;
+
+  /* ── Rounded scale ──────────────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* ── Named spacing ──────────────────────────────────────────────────────── */
+  --spacing-reading-measure: 68ch;
+  --spacing-panel-gutter: 32px;
+  --spacing-card-padding: 24px;
+  --spacing-option-gap: 12px;
+}
+
+/* ── Dark mode mapping (prefers-color-scheme) ────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface-base: #1a1815;
+    --color-surface-raised: #232019;
+    --color-surface-sunken: #141210;
+    --color-ink: #ede9e2;
+    --color-ink-muted: #a39c91;
+    --color-primary: #8fb8cc;
+    --color-primary-foreground: #1a1815;
+    --color-accent: #e29b6b;
+    --color-accent-foreground: #1a1815;
+    --color-strength-strong: #86b894;
+    --color-strength-mixed: #dcb46a;
+    --color-strength-weak: #d89185;
+    --color-strength-foreground: #1a1815;
+  }
+}
+
+/* ── Base layer — calm study surface, warm paper neutrals ────────────────── */
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-surface-base);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  /* Focus ring: 2px accent, 2px offset, on every interactive element (AC #14). */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /*
+   * Headings carrying `tabindex="-1"` are route-change announcement targets:
+   * they are focused programmatically so a screen reader reads the new page,
+   * and they are NOT user-operable. Chromium still matches :focus-visible on
+   * them, which painted a ring around "Your results" that reads as a stray
+   * bordered box. Suppressing it here keeps the ring meaningful — it should
+   * only ever appear on something you can actually interact with.
+   */
+  h1[tabindex='-1']:focus,
+  h1[tabindex='-1']:focus-visible,
+  [data-focus-target]:focus-visible {
+    outline: none;
+  }
+
+  /*
+   * Assistant chat content is model-authored markdown, so its width is not
+   * something we control — a table or a long code span will happily exceed the
+   * chat column and get clipped at the panel edge (observed live: a study-plan
+   * table lost its right-hand column). Wide content scrolls inside its own box
+   * rather than overflowing the panel or the page.
+   */
+  [data-testid='chat-message-assistant-body'] {
+    overflow-wrap: anywhere;
+  }
+
+  /*
+   * The wrapper scrolls; the table inside sizes to its content. Without
+   * `width: max-content` the table compresses to the panel width instead,
+   * which wraps headers mid-word ("Que / stio / n") — technically contained,
+   * but unreadable. Scrolling is the better trade in a narrow chat column.
+   */
+  [data-testid='chat-message-assistant-body'] table {
+    display: block;
+    width: max-content;
+    max-width: none;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+
+  [data-testid='chat-message-assistant-body'] :is(th, td) {
+    padding: 0.375rem 0.625rem;
+    border: 1px solid var(--color-surface-sunken);
+    text-align: left;
+    vertical-align: top;
+    min-width: 8ch;
+    overflow-wrap: normal;
+  }
+
+  [data-testid='chat-message-assistant-body'] :is(pre, code) {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: var(--text-display);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  /* Honoring prefers-reduced-motion everywhere (EXPERIENCE.md). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

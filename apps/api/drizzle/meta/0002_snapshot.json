@@ -1,0 +1,13 @@
+{
+  "id": "0002_quiz_tables",
+  "prevId": "0001_session_rls",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  }
+}
