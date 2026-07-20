@@ -1,0 +1,22 @@
+{
+  "name": "@ai-quiz/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ai-quiz Next.js web app (App Router).",
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'dev: scaffold-only; Next.js wires up in Epic 2' && exit 0",
+    "build": "echo 'build: scaffold-only; Next.js wires up in Epic 2' && exit 0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'test: scaffold-only; unit tests land in Epic 3' && exit 0",
+    "test:e2e": "echo 'test:e2e: scaffold-only; Playwright lands in Story 5.2' && exit 0"
+  },
+  "dependencies": {
+    "@ai-quiz/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "typescript": "~6.0.3",
+    "vitest": "4.1.10"
+  }
+}

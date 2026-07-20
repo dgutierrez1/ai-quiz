@@ -1,0 +1,28 @@
+# pnpm 11.15.1 was the resolved pin (per spine Stack table), but the installed
+# pnpm in this dev env is 11.8.0. We record the actual version here rather than
+# upgrading pnpm globally — workspace install works on either. Bump to 11.15.1
+# when Corepack is enabled in the dev container.
+#
+# NOTE: the domain tsconfig at `apps/api/src/domain/tsconfig.json` is an
+# isolated DIRECTORY (per spine AD-2), not a workspace package. It must NOT
+# appear in `packages:` below; ESLint's projectService discovers it via the
+# tsconfig extends chain.
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 11 strict-isolation policy: hoist only the toolchain packages that
+# need to resolve from `.bin/` (eslint, prettier, husky, lint-staged). All
+# other packages stay isolated per workspace.
+pnpm:
+  onlyBuiltDependencies:
+    - '@nestjs/core'
+    - '@parcel/watcher'
+    - esbuild
+    - '@swc/core'
+  publicHoistPattern:
+    - '*eslint*'
+    - '*prettier*'
+    - husky
+    - lint-staged
+    - vitest

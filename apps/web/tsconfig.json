@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "jsx": "preserve",
+    "lib": ["es2025", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": ["app/**/*", "components/**/*", "lib/**/*", "scaffold.tsx"],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "dist",
+    "build",
+    "e2e/**",
+    "**/vitest.config.ts",
+    "**/*.tsbuildinfo"
+  ]
+}
