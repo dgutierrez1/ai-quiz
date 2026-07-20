@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./",
+    "types": ["node"],
+    "lib": ["es2025"]
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "build", "**/*.tsbuildinfo", "src/domain/__fixtures__/**"]
+}

@@ -1,0 +1,29 @@
+# Local Postgres for ai-quiz dev. Production uses Neon (see .env.example).
+# Image pinned to postgres:16.14-alpine per spine Stack + project-context.md:
+# the bare `postgres:16.14` tag moved to trixie (a different distro), so
+# pinning the bare tag silently changes the OS underneath us.
+
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    container_name: ai-quiz-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ai_quiz
+      POSTGRES_PASSWORD: ai_quiz
+      POSTGRES_DB: ai_quiz
+    ports:
+      - "5432:5432"
+    volumes:
+      - ai-quiz-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready exits 0 when the server accepts connections.
+      test: ["CMD-SHELL", "pg_isready -U ai_quiz -d ai_quiz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  ai-quiz-postgres-data:
+    name: ai-quiz-postgres-data

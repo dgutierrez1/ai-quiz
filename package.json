@@ -1,0 +1,44 @@
+{
+  "name": "ai-quiz",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AI Quiz Agent — turns any markdown document into an interactive quiz, then chats about the gaps.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.1",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "scripts": {
+    "dev": "pnpm -r --if-present --parallel run dev",
+    "build": "pnpm -r --if-present run build",
+    "test": "vitest run",
+    "test:e2e": "echo 'test:e2e: deferred to Story 5.2 (Playwright)' && exit 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:check": "eslint . --max-warnings=0",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "db:migrate": "echo 'db:migrate: deferred to Story 1.4 (Drizzle)' && exit 0",
+    "db:generate": "echo 'db:generate: deferred to Story 1.4 (Drizzle)' && exit 0",
+    "verify": "pnpm run lint:check && pnpm run typecheck && pnpm run test && pnpm run test:e2e && pnpm run build",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,ts,tsx,jsx,json,md,yml,yaml}": "prettier --write",
+    "*.{js,mjs,cjs,ts,tsx,jsx}": "eslint --fix --max-warnings=0"
+  },
+  "devDependencies": {
+    "@ai-quiz/eslint-plugin-local": "workspace:*",
+    "@eslint/js": "10.0.1",
+    "eslint": "10.7.0",
+    "eslint-plugin-simple-import-sort": "14.0.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.1.0",
+    "prettier": "3.9.5",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

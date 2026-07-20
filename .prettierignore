@@ -1,0 +1,25 @@
+# Lockfiles — pnpm/yarn/npm may reorder blocks across regenerations; formatting
+# them in CI creates noisy diffs unrelated to source code changes.
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Test artifacts
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Tooling / planning artifacts (never formatted by Prettier anyway)
+_bmad-output/
+_bmad/
+.opencode/
+.agents/
+.claude/
+.husky/_/

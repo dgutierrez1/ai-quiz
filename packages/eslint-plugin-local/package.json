@@ -1,0 +1,17 @@
+{
+  "name": "@ai-quiz/eslint-plugin-local",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ai-quiz ESLint plugin harness for project-specific rules. Custom rules land here with the code they guard (Story 1.4: no-unscoped-session-query; first UI story: require-data-testid).",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "typecheck": "echo 'plugin has no TypeScript source (Story 1.1: harness only)' && exit 0"
+  },
+  "peerDependencies": {
+    "eslint": ">=10.0.0"
+  }
+}
